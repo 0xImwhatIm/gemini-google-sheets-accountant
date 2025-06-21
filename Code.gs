@@ -1,10 +1,12 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V28.5 - 智慧升級版 (開源準備版)
+// 版本：V29.0 - Gmail 自動化版
 // 作者：[您的名稱]
-// 最後更新：2025-06-20
-// 說明：此版本為準備上傳至 GitHub 的開源版本。它整合了多模式輸入、強化的 AI 辨識
-//       與穩定的錯誤處理機制。使用者需在下方設定區填入自己的金鑰與 ID。
+// 最後更新：2025-06-21
+// 說明：此版本為重大功能更新，加入了「管道一：官方發票管道」的核心功能。
+//       新增了 syncInvoicesFromGmail() 等相關函式，使其具備自動掃描 Gmail、
+//       解析官方電子發票郵件並自動記帳的能力。
+// 注意：首次執行此版本，需額外授權 Google Apps Script 讀取您的 Gmail (gmail.readonly)。
 // =================================================================================================
 
 // =================================================================================================
@@ -14,9 +16,133 @@
 const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
 const SHEET_NAME = 'All Records'; // 請確認您的工作表分頁名稱與此處相符
 const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
-const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_PROCESSING'; 
+const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_PROCESSING';
 const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVING';
 const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES';
+// =================================================================================================
+
+
+// =================================================================================================
+// 【V29.0 新增功能】官方電子發票自動化管道
+// =================================================================================================
+
+/**
+ * @description 【主函式】每日執行的官方發票同步作業。
+ * 此函式應由時間觸發器每日自動執行一次。
+ */
+function syncInvoicesFromGmail() {
+  const query = "from:invoice@einvoice.nat.gov.tw is:unread";
+  const threads = GmailApp.search(query);
+  let successCount = 0;
+
+  threads.forEach(thread => {
+    const messages = thread.getMessages();
+    messages.forEach(message => {
+      // 確保郵件是未讀的才處理
+      if (message.isUnread()) {
+        try {
+          const invoiceData = parseInvoiceEmail(message.getBody());
+          
+          if (invoiceData && invoiceData.invoiceNumber) {
+            // 進行查重與寫入
+            const isWritten = writeToSheetFromEmail(invoiceData);
+            if (isWritten) {
+              successCount++;
+            }
+            // 無論是否寫入 (可能因重複而跳過)，都將郵件標示為已讀
+            message.markRead();
+          }
+        } catch (e) {
+          Logger.log(`處理郵件失敗: ${e.toString()}. 主旨: ${message.getSubject()}`);
+        }
+      }
+    });
+  });
+
+  if (successCount > 0) {
+    Logger.log(`Gmail 同步作業完成，成功新增 ${successCount} 筆官方電子發票紀錄。`);
+  } else {
+    Logger.log("Gmail 同步作業完成，沒有發現新的官方電子發票。");
+  }
+}
+
+/**
+ * @description 【輔助函式】解析財政部官方電子發票郵件的內文 (HTML)。
+ * @param {string} htmlBody - 郵件的 HTML 內文。
+ * @returns {Object|null} - 包含發票資訊的物件，或在解析失敗時回傳 null。
+ */
+function parseInvoiceEmail(htmlBody) {
+  // 使用正規表達式從 HTML 中提取關鍵資訊
+  const invoiceNumberMatch = htmlBody.match(/發票號碼(?:<[^>]+>)*\s*([A-Z]{2}-\d{8})/);
+  const dateMatch = htmlBody.match(/開立日期(?:<[^>]+>)*\s*(\d{3}\/\d{2}\/\d{2})/);
+  const amountMatch = htmlBody.match(/總計(?:<[^>]+>)*\s*NT\$([\d,]+)/);
+  const sellerMatch = htmlBody.match(/賣方營業人名稱(?:<[^>]+>)*\s*([^<]+)/);
+
+  if (!invoiceNumberMatch || !dateMatch || !amountMatch || !sellerMatch) {
+    Logger.log("郵件解析失敗：找不到所有必要的發票欄位。");
+    return null;
+  }
+  
+  // 處理民國年 -> 西元年
+  const minguoYear = parseInt(dateMatch[1].substring(0, 3), 10);
+  const adYear = minguoYear + 1911;
+  const monthDay = dateMatch[1].substring(4);
+  const formattedDate = `${adYear}/${monthDay}`;
+
+  return {
+    invoiceNumber: invoiceNumberMatch[1],
+    timestamp: new Date(formattedDate),
+    amount: parseFloat(amountMatch[1].replace(/,/g, '')),
+    item: sellerMatch[1].trim(), // 將賣方名稱作為品項
+    currency: 'TWD'
+  };
+}
+
+/**
+ * @description 【輔助函式】將從 Email 解析出的發票資料寫入 Google Sheet，並進行查重。
+ * @param {Object} data - 從 parseInvoiceEmail 解析出的發票物件。
+ * @returns {boolean} - 如果成功寫入則回傳 true，如果是重複紀錄則回傳 false。
+ */
+function writeToSheetFromEmail(data) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
+  const dataRange = sheet.getRange("I2:I" + sheet.getLastRow()); // 只檢查發票號碼欄 (I)
+  const existingInvoiceNumbers = dataRange.getValues().flat();
+
+  // 管道一的查重核心：只比對絕對唯一的發票號碼
+  if (existingInvoiceNumbers.includes(data.invoiceNumber)) {
+    Logger.log(`發現重複的官方發票，跳過寫入：${data.invoiceNumber}`);
+    return false;
+  }
+
+  const amountTWD = data.amount;
+  
+  const row = [
+    data.timestamp,
+    data.amount,
+    data.currency,
+    1, // Exchange Rate
+    amountTWD,
+    '其他', // Category (官方發票預設為其他，可手動修改)
+    data.item,
+    '私人', // Account Type
+    data.invoiceNumber,
+    null, // Reference No.
+    null, // Buyer Name
+    null, // Buyer Tax ID
+    null, // Seller Tax ID
+    null, // Photo Link
+    '待確認', // Status
+    '電子發票', // Source
+    `由 ${data.item} 開立`, // Notes
+    null, // Raw Text
+    null  // Translation
+  ];
+  sheet.appendRow(row);
+  return true;
+}
+
+// =================================================================================================
+// 既有功能 (V28.6)
 // =================================================================================================
 
 /**
@@ -26,23 +152,19 @@ const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES';
  */
 function doPost(e) {
   try {
-    // 檢查請求內容是否存在
     if (!e || !e.postData || !e.postData.contents) {
       throw new Error("無效的請求：缺少 postData。");
     }
     
     const params = JSON.parse(e.postData.contents);
     const imageBase64 = params.image_base64;
-    const voiceText = params.voice_text; // 可能是語音辨識文字，也可能是旅行筆記的備註
+    const voiceText = params.voice_text;
     const fileName = params.filename || `image_${new Date().getTime()}.jpg`;
 
-    // 根據收到的參數，決定執行哪個處理流程
     if (imageBase64) {
-      // 模式：純拍照 或 旅行筆記 (照片+語音)
       const imageBytes = Utilities.base64Decode(imageBase64);
       return processImage(imageBytes, fileName, voiceText);
     } else if (voiceText) {
-      // 模式：純語音記帳
       return processVoice(voiceText);
     } else {
       throw new Error("無效的請求：必須提供 image_base64 或 voice_text。");
@@ -50,7 +172,6 @@ function doPost(e) {
 
   } catch (error) {
     Logger.log(`[doPost Error] ${error.toString()}`);
-    // 回傳一個標準化的錯誤訊息給前端
     return ContentService.createTextOutput(JSON.stringify({
       status: 'error',
       message: `後端處理失敗: ${error.message}`
@@ -70,12 +191,11 @@ function processImage(imageBytes, fileName, optionalVoiceNote) {
   const tempFile = processFolder.createFile(Utilities.newBlob(imageBytes, 'image/jpeg', fileName));
   
   try {
-    const aiResult = callGeminiForVision(imageBytes, optionalVoiceNote); 
+    const aiResult = callGeminiForVision(imageBytes, optionalVoiceNote);
     const parsedData = JSON.parse(aiResult.text);
     const rawText = aiResult.rawText || '';
     const translation = aiResult.translation || '';
 
-    // 執行進階查重
     if (isDuplicate(parsedData, rawText)) {
       const duplicatesFolder = DriveApp.getFolderById(FOLDER_ID_DUPLICATES);
       tempFile.moveTo(duplicatesFolder);
@@ -86,10 +206,8 @@ function processImage(imageBytes, fileName, optionalVoiceNote) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 將資料寫入 Google Sheet
     writeToSheetFromOCR(parsedData, tempFile.getUrl(), rawText, translation, optionalVoiceNote);
 
-    // 歸檔處理完成的圖片
     const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
     tempFile.moveTo(archiveFolder);
     
@@ -102,7 +220,6 @@ function processImage(imageBytes, fileName, optionalVoiceNote) {
 
   } catch (error) {
     Logger.log(`[processImage Error] ${error.toString()} for file ${fileName}`);
-    // 如果處理失敗，檔案會留在待處理資料夾中供手動檢查
     return ContentService.createTextOutput(JSON.stringify({
       status: 'error',
       message: `處理影像時發生錯誤: ${error.message}`
@@ -120,7 +237,6 @@ function processVoice(voiceText) {
     const aiResultText = callGeminiForVoice(voiceText);
     const parsedData = JSON.parse(aiResultText);
     
-    // 語音模式不進行查重，直接寫入
     writeToSheetFromVoice(parsedData);
 
     Logger.log(`成功處理語音記帳: "${voiceText}"`);
@@ -153,13 +269,13 @@ function callGeminiForVision(imageBytes, voiceNote) {
     {
       "structuredData": {
           "timestamp": "2025-06-20T19:30:00",
-          "amount": 120,
+          "amount": 165,
           "currency": "TWD",
-          "item": "某某咖啡店",
-          "category": "餐飲",
-          "invoiceNumber": "AB-12345678",
-          "referenceNumber": null,
-          "notes": "和朋友喝下午茶"
+          "item": "海關進口稅費",
+          "category": "帳單",
+          "invoiceNumber": null,
+          "referenceNumber": "CX121133534477",
+          "notes": "從國外網站買東西的關稅"
       },
       "rawText": "這裡是從圖片辨識出的所有原始文字...",
       "translation": "如果原文是外語，這裡是翻譯後的繁體中文..."
@@ -169,20 +285,27 @@ function callGeminiForVision(imageBytes, voiceNote) {
     1.  **rawText:** 提取圖片中的所有原始文字，放到 "rawText" 欄位。
     2.  **translation:** 如果原始文字為外語，請將其翻譯成繁體中文，放到 "translation" 欄位。如果原始文字是中文，此欄位回傳 null。
     3.  **structuredData:** 根據原始文字和語音備註，填寫結構化資料：
-        * **timestamp:** 提取交易日期與時間。找不到則用今天中午12點。
-        * **amount:** 提取總金額。
-        * **currency:** 判斷幣別 (e.g., TWD, JPY, USD)。"$" 優先視為 "TWD"。
-        * **item:** 商家名稱或主要品項。
-        * **category:** **必須**從 [餐飲, 交通, 購物, 娛樂, 居家, 醫療, 帳單, 雜項, 旅遊, 投資, 收入, 工作] 中選擇。
-        * **invoiceNumber:** 10位數發票號碼，沒有則回傳 null。
-        * **referenceNumber:** 其他參考編號，沒有則回傳 null。
-        * **notes:** 填入下方提供的語音備註。
+        * **特殊文件規則：**
+            * 如果文件標題包含「海關」、「繳納證明」或「罰單」，這是一筆「帳單」費用。
+            * **金額 (amount):** 請優先尋找「稅費合計」、「總計」、「應繳金額」等字樣旁的數字作為總金額。忽略明細項目。
+            * **品項 (item):** 直接使用文件的大標題，例如「海關進口稅費」或「交通罰單」。
+            * **參考編號 (referenceNumber):** 尋找如「稅單號碼」、「單號碼」等唯一識別碼。
+            * **日期 (timestamp):** 優先尋找「填發日期」、「繳費日期」或文件上最新的日期。
+        * **一般收據規則：**
+            * **timestamp:** 提取交易日期與時間。找不到則用今天中午12點。
+            * **amount:** 提取總金額 (Total)。
+            * **currency:** 判斷幣別 (e.g., TWD, JPY, USD)。"$" 優先視為 "TWD"。
+            * **item:** 商家名稱或主要品項。
+            * **category:** **必須**從 [餐飲, 交通, 購物, 娛樂, 居家, 醫療, 帳單, 雜項, 旅遊, 投資, 收入, 工作] 中選擇。
+            * **invoiceNumber:** 10位數發票號碼，沒有則回傳 null。
+        * **通用規則：**
+            * **notes:** 填入下方提供的語音備註。
 
     **語音備註:** ${voiceNote || "無"}
     `;
 
   const requestBody = {
-    "contents": [{ 
+    "contents": [{
         "role": "user",
         "parts": [
           { "text": prompt },
@@ -367,14 +490,12 @@ function isDuplicate(data, rawText) {
   const dataRange = sheet.getDataRange();
   const values = dataRange.getValues();
   
-  // V5 Schema Column Indexes
-  const INVOICE_COL = 8; // 發票號碼 (I)
-  const REF_NO_COL = 9; // 參考編號 (J)
-  const DATE_COL = 0;    // 時間戳 (A)
-  const AMOUNT_TWD_COL = 4; // 金額 TWD (E)
-  const RAW_TEXT_COL = 17; // OCR 原文 (R)
+  const INVOICE_COL = 8;
+  const REF_NO_COL = 9;
+  const DATE_COL = 0;
+  const AMOUNT_TWD_COL = 4;
+  const RAW_TEXT_COL = 17;
 
-  // 主要路徑：檢查發票號碼或參考編號
   if (data.invoiceNumber) {
     for (let i = 1; i < values.length; i++) {
       if (values[i][INVOICE_COL] === data.invoiceNumber) return true;
@@ -386,8 +507,7 @@ function isDuplicate(data, rawText) {
     }
   }
   
-  // Fallback 路徑：檢查日期、金額、原文相似度
-  if (!rawText || rawText.trim() === '') return false; // 如果沒有原文，不進行相似度比對
+  if (!rawText || rawText.trim() === '') return false;
 
   const newDate = new Date(data.timestamp);
   const newAmount = parseFloat(data.amount);
@@ -402,10 +522,8 @@ function isDuplicate(data, rawText) {
     const timeDiff = Math.abs(newDate.getTime() - existingDate.getTime());
     const dayDiff = timeDiff / (1000 * 3600 * 24);
     
-    // 日期在 ±1 天內，且金額幾乎相同
     if (dayDiff <= 1 && Math.abs(newAmount - existingAmount) < 0.01) {
       const similarity = 1 - (levenshtein(rawText, existingRawText) / Math.max(rawText.length, existingRawText.length));
-      // 原文相似度 > 90%
       if (similarity > 0.9) {
         Logger.log(`偵測到高度相似紀錄 (相似度: ${similarity})，視為重複。`);
         return true;
@@ -431,7 +549,6 @@ async function getExchangeRate(currency) {
   }
 
   try {
-    // 優先使用具備備援的 API
     const url = `https://api.exchangerate-api.com/v4/latest/${currency}`;
     const response = await UrlFetchApp.fetch(url);
     const data = JSON.parse(response.getContentText());
@@ -439,12 +556,11 @@ async function getExchangeRate(currency) {
 
     if (!rate) throw new Error("API 未回傳 TWD 匯率。");
 
-    cache.put(currency, rate.toString(), 3600); // 暫存 1 小時
+    cache.put(currency, rate.toString(), 3600);
     return rate;
 
   } catch (error) {
     Logger.log(`[getExchangeRate Error] ${error.toString()}. 使用備案匯率。`);
-    // 備案：手動維護的匯率表
     const fallbackRates = { 'JPY': 0.21, 'USD': 32.5, 'EUR': 35.0, 'CNY': 4.5 };
     return fallbackRates[currency] || 1;
   }
@@ -497,7 +613,6 @@ function checkReceiptsFolder() {
     const file = files.next();
     const fileName = file.getName();
     
-    // 簡易的配對邏輯：尋找同檔名的 .txt 備註檔
     let voiceNote = null;
     try {
       const noteFileName = fileName.split('.')[0] + '.txt';
@@ -505,7 +620,6 @@ function checkReceiptsFolder() {
       if (noteFiles.hasNext()) {
         const noteFile = noteFiles.next();
         voiceNote = noteFile.getBlob().getDataAsString();
-        // 刪除備註檔
         noteFile.setTrashed(true);
       }
     } catch(e) {
@@ -516,3 +630,4 @@ function checkReceiptsFolder() {
     processImage(file.getBlob().getBytes(), fileName, voiceNote);
   }
 }
+
