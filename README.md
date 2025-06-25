@@ -1,67 +1,71 @@
-智慧記帳 GEM (Gemini AI Accountant)
-一個基於 Google Apps Script 和 Gemini 1.5 Flash API 打造的 AI 智慧記帳系統。本專案的核心是全自動化，它能每日自動掃描您的 Gmail，主動將來自財政部的官方電子發票，以及各大廠商（如 Uber, Agoda, PChome）的 PDF 電子收據，在雲端進行 AI 分析、查重後，無感地、準確地記錄到您的 Google Sheets 帳本中。
-同時，它也保留了高效率的手動輸入方式，支援語音、拍照、以及從手機相簿選取照片進行記帳。
-✨ 主要特色
-雙軌全自動化 (Dual-Track Full Automation): 這是本專案的靈魂。
-官方發票管道: 每日自動同步財政部的官方電子發票郵件，作為記帳的「絕對真相來源」。
-廠商收據管道: 定期自動從 Gmail 中抓取指定廠商（如 Uber, Apple, 中華電信）的 PDF 附件，交由 AI 處理，實現即時記帳與補漏。
-多模態視覺 AI 引擎 (Multi-modal Vision AI):
-PDF 視覺增強: 我們不再使用傳統的、易出錯的 PDF 文字提取。系統現在讓 AI 直接「看見」PDF 檔案，如同看見圖片一樣，大幅提升了對複雜格式（如 Agoda 行程單、海關稅單）的辨識準確性。
-泛用性辨識: AI 指令經過特殊設計，使其不僅限於制式發票，更能應對醫療收據、手寫單據等各式複雜文件。
-全文 OCR & 自動翻譯: 能完整記錄收據上的所有原始文字 (Raw Text)，並可自動將外文收據翻譯成繁體中文。
-高效率手動輸入: 保留了純語音、純拍照、「照片 + 語音備註」以及從手機相簿選取照片等多種捷徑，滿足各種即時記帳與事後補登的需求。
-階級式查重機制 (Hierarchical De-duplication): 為了應對多種數據來源，系統採用了先進的查重邏輯，優先比對「統一發票號碼」，其次比對「參考編號」，最後才使用「日期+金額+原文相似度」進行模糊比對，徹底杜絕重複記帳。
-🛠️ 技術棧
-後端: Google Apps Script (JavaScript)
-前端: Apple iPhone Shortcuts (捷徑)
-AI 模型: Google Gemini 1.5 Flash API
-資料庫: Google Sheets
-自動化核心: GmailApp Service, Time-driven Triggers
-🚀 如何設定
-請依照以下五個步驟，完成您的個人 AI 記帳系統設定。
-步驟一：設定 Google Sheet
-建立一個新的 Google Sheet。
-在其中建立一個名為 All Records 的工作表分頁。
-將這個 Google Sheet 的 ID (網址中 .../d/ 和 /edit 之間的一長串亂碼) 記錄下來。
-步驟二：設定 Google Drive 資料夾
-在您的 Google Drive 中，建立三個新的資料夾，例如：
-Receipts_to_Process (待處理資料夾)
-Receipts_Archived (已歸檔資料夾)
-Receipts_Duplicates (重複項資料夾)
-分別取得這三個資料夾的 ID (同樣在網址中可以找到)。
-步驟三：設定 Google Apps Script
-打開您在步驟一建立的 Google Sheet，點擊頂部選單的「擴充功能」->「Apps Script」。
-將本專案提供的 Code.gs 檔案中的程式碼，完整貼到您的專案指令碼編輯器中。
-在程式碼最上方的「使用者設定區」，填入您自己的 SPREADSHEET_ID, GEMINI_API_KEY, 以及三個 FOLDER_ID。
-客製化您的廠商列表： 在 VENDOR_QUERIES 這個陣列中，加入或修改您想自動處理的廠商郵件搜尋條件。
-點擊「儲存專案」。
-點擊右上角的「部署」->「新增部署作業」。
-在「選取類型」處選擇「網頁應用程式」。
-在「誰可以存取」的下拉選單中，選擇「知道連結的任何人」。
-點擊「部署」，並複製產生的「網頁應用程式網址」，我們在下一步會用到。
-首次授權： 在編輯器中，手動執行一次 syncInvoicesFromGmail 函式，並依照畫面指示，完成 Gmail 的授權。
-步驟四：設定前端 iPhone 捷徑
-參考本專案提供的四份捷徑設定說明書，建立您需要的捷徑（語音、拍照、旅行、選取）。
-在每一個捷徑的「取得 URL 的內容」動作中，都貼上您在步驟三取得的「網頁應用程式網址」。
-步驟五：設定自動化觸發器 (最關鍵的一步)
-在 Apps Script 編輯器的左側選單中，點擊「觸發條件」(鬧鐘圖示)。
-點擊「+ 新增觸發條件」，並建立三個觸發器：
-觸發器 1 (官方發票同步):
-要執行的功能選擇：syncInvoicesFromGmail
-選取活動來源：時間驅動
-類型：日計時器
-時間：凌晨 3 點至 4 點
-觸發器 2 (廠商收據同步):
-要執行的功能選擇：syncPdfsFromGmail
-選取活動來源：時間驅動
-類型：小時計時器
-時間間隔：每小時
-觸發器 3 (背景檔案處理):
-要執行的功能選擇：checkReceiptsFolder
-選取活動來源：時間驅動
-類型：分鐘計時器
-時間間隔：每 15 分鐘
-至此，您的全自動 AI 記帳系統已全部設定完畢！
-📄 授權條款
-本專案採用 MIT License 授權。
+# 智慧記帳 GEM (Gemini AI Accountant)
+
+一個由 Google Apps Script 驅動的智慧記帳系統，透過強大的 AI 中央廚房，能自動將生活中的非結構化資訊（如 PDF 收據、照片、語音）轉化為結構化的記帳資料。
+
+## ✨ 功能特色 (Features)
+
+* **多入口記帳**: 支援透過上傳 **圖片**、**PDF**、或 **語音** 文字進行記帳。
+* **雙引擎 PDF 解析**:
+    * **主引擎**: 整合 **Google Cloud Document AI**，專業處理複雜的商業收據，提取高品質文字。
+    * **備用引擎**: 內建多編碼文字解析，確保在任何情況下服務不中斷。
+* **AI 教官級辨識**:
+    * 採用 **Gemini Pro** 作為核心理解模型。
+    * 透過 **範例學習 (Few-Shot Learning)** 機制，AI 能夠從真實範例中學習，精準判斷日期優先級、處理特定貨幣金額、並進行準確分類。
+* **全自動化管道**:
+    * 可自動監控 Gmail，抓取指定郵件中的 PDF 附件（如 Uber, Agoda, PChome）並進行處理。
+    * 可自動處理財政部電子發票郵件。
+* **高度穩定性**: 具備完善的錯誤處理與智慧分流機制，能應對無效檔案、API 錯誤、權限問題等多種狀況。
+
+## 🛠️ 技術架構 (Tech Stack)
+
+* **後端**: Google Apps Script (V8 Runtime)
+* **核心 AI**:
+    * Google Gemini API
+    * Google Cloud Document AI API
+* **資料庫**: Google Sheets
+
+## 🚀 設定與部署 (Setup & Deployment)
+
+請依照以下步驟完成專案的設定與部署：
+
+1.  **填寫基本設定**:
+    * 在 `程式碼.gs` 檔案的【使用者設定區】中，填入您的：
+        * `MAIN_LEDGER_ID`: 您的 Google Sheet ID。
+        * `GEMINI_API_KEY`: 您的 Gemini API 金鑰。
+        * `FOLDER_ID...`: 相關的 Google Drive 資料夾 ID。
+
+2.  **設定 Google Cloud (啟用主引擎)**:
+    * **連結專案**: 在 Apps Script 編輯器的「專案設定」中，將此腳本連結到一個 Google Cloud Platform (GCP) 專案。
+    * **啟用 API**: 在該 GCP 專案中，啟用 **Document AI API**。
+    * **建立處理器**: 在 Document AI 工作台中，建立一個「Receipt Parser」或「Invoice Parser」處理器。
+    * **啟用結算**: 確保您的 GCP 專案已**啟用結算功能** (綁定付款方式)。Document AI 有免費額度，但此為使用進階服務的必要步驟。
+
+3.  **填寫 GCP 設定**:
+    * 回到 `程式碼.gs`，填入您剛剛取得的：
+        * `GCP_PROJECT_ID`: 您的 GCP 專案 ID。
+        * `DOCUMENT_AI_PROCESSOR_ID`: 您的 Document AI 處理器 ID。
+
+4.  **更新授權範圍**:
+    * 在 Apps Script 編輯器的「專案設定」中，勾選「在編輯器中顯示 `appsscript.json` Manifest 檔案」。
+    * 點開 `appsscript.json` 檔案，確保 `oauthScopes` 陣列中包含以下這行：
+        ```json
+        "[https://www.googleapis.com/auth/cloud-platform](https://www.googleapis.com/auth/cloud-platform)"
+        ```
+
+5.  **部署與授權**:
+    * 點擊右上角的「部署」>「新增部署作業」。
+    * 類型選擇「網頁應用程式」，並設定相關存取權限。
+    * 點擊「部署」後，複製產生的 Web App URL。
+    * 執行一次需要新權限的操作（如上傳 PDF），並在跳出的視窗中**同意**所有權限請求。
+
+## 📝 產品藍圖 (Roadmap)
+
+* **近期目標**:
+    * 實作「代墊款追蹤器」功能。
+    * 建立「旅行回憶」帳本原型。
+* **遠期目標**:
+    * 遷移後端至 Firebase Cloud Functions。
+    * 開發跨平台 App (React Native / Flutter)。
+    * 推出「差旅報帳」與「家庭理財」產品線。
+
 
