@@ -1,11 +1,12 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V36.1 - 語法錯誤修正版
-// 作者：[您的名稱]
-// 最後更新：2025-06-25
-// 說明：此版本修正了 V36.0 中因 prompt 字串建構方式，而導致在特定環境下產生語法錯誤的問題。
-//      1. 【修正】: 重寫 callGeminiForPdfText 的 prompt 建構邏輯，改用陣列組合，確保語法穩定性。
-//      2. AI 的「範例學習」功能與所有邏輯均保持不變。
+// 版本：V38.1 - 多目標語音記帳與時間精度強化
+// 作者：0ximwhatim & Gemini
+// 最後更新：2025-06-27
+// 說明：此版本根據使用者反饋，進行了多項功能擴充與 AI 指令優化。
+//      1. 【AI 指令升級】: callGeminiForVoice 的 prompt 全面強化，現在能從自然語言中解析相對時間，並以 ISO 8601 格式回傳。
+//      2. 【功能擴充】: 語音記帳流程 (doPost_Voice -> processVoice -> writeToSheetFromVoice) 已完全支援 target_sheet_id，可將語音紀錄寫入指定帳本。
+//      3. 【規則擴展】: EMAIL_PROCESSING_RULES 中已新增「國泰產險繳費通知」的 HTML 處理規則。
 // =================================================================================================
 
 // =================================================================================================
@@ -23,27 +24,54 @@ const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_PROCESSING';
 const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVING';
 const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES'; // 也可用於歸檔錯誤檔案
 
-// 【廠商收據自動化設定】
-const VENDOR_QUERIES = [
-  "from:receipts-noreply@uber.com",
-  "from:noreply@uber.com has:attachment",
-  "from:agoda@agoda.com subject:預訂確認",
-  "from:service@pchomepay.com.tw subject:電子發票開立通知",
-  'from:no_reply@email.apple.com subject:"你的 Apple 開立發票通知"',
-  'from:service@ebill.firstbank.tw subject:"第一銀行信用卡電子對帳單"',
-  'from:invoice@cht.com.tw subject:"中華電信電子發票"',
-  'from:ebill@water.gov.taipei subject:"臺北自來水事業處"',
-  'from:payments-noreply@google.com subject:"Google：隨信附上您的電子應付憑據 (統一發票)"',
-  'from:invoice@mail2.ei.com.tw subject:"電子發票開立通知"'
+// ============================= V38.1 函式修改 START =============================
+// 【統一郵件處理規則書】
+// type: 'HTML' -> 解析 HTML 內容 (優先從 .htm/.html 附件，其次從郵件內文)，適用於官方電子發票。
+// type: 'PDF'  -> 抓取 PDF 附件，適用於廠商收據。
+const EMAIL_PROCESSING_RULES = [
+  // --- HTML 內文/附件處理規則 ---
+  { query: 'from:invoice@einvoice.nat.gov.tw', type: 'HTML' },
+  { query: 'from:invoice@mail2.ei.com.tw subject:"電子發票開立通知"', type: 'HTML' },
+  { query: 'from:service@pchomepay.com.tw subject:"電子發票開立通知"', type: 'HTML' },
+  { query: 'from:invoice@cht.com.tw subject:"中華電信電子發票"', type: 'HTML' },
+  { query: 'from:payonline@cathay-ins.com.tw subject:"國泰產險保費繳費成功通知"', type: 'HTML' }, // 新增保險繳費規則
+  
+  // --- PDF 附件處理規則 ---
+  { query: 'from:receipts-noreply@uber.com', type: 'PDF' },
+  { query: 'from:noreply@uber.com has:attachment', type: 'PDF' },
+  { query: 'from:agoda@agoda.com subject:預訂確認', type: 'PDF' },
+  { query: 'from:no_reply@email.apple.com subject:"你的 Apple 開立發票通知"', type: 'PDF' },
+  { query: 'from:service@ebill.firstbank.tw subject:"第一銀行信用卡電子對帳單"', type: 'PDF' },
+  { query: 'from:ebill@water.gov.taipei subject:"臺北自來水事業處"', type: 'PDF' },
+  { query: 'from:payments-noreply@google.com subject:"Google：隨信附上您的電子應付憑據 (統一發票)"', type: 'PDF' },
 ];
+// ============================= V38.1 函式修改 END ===============================
 // =================================================================================================
 
 
 // =================================================================================================
 // 【V35.0 核心】多入口路由
 // =================================================================================================
+
 /**
- * @description 主 Web App 入口，根據 URL 參數，將請求路由到不同的處理函式。
+ * @description 處理 HTTP GET 請求。
+ * 主要用於處理因 Web App 重新導向，導致客戶端將 POST 轉為 GET 的錯誤情境。
+ * @param {Object} e - Apps Script 的事件物件。
+ * @returns {ContentService.TextOutput} 一個結構化的 JSON 錯誤訊息。
+ */
+function doGet(e) {
+  const endpoint = e.parameter.endpoint || 'unknown';
+  Logger.log(`一個 GET 請求被接收，端點為: ${endpoint}。這應該是一個 POST 請求，可能是由重新導向造成。`);
+  
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'error',
+    message: `接收到 GET 請求，但此 API 端點只接受 POST 請求。請檢查您的捷徑設定，或確認 Web App 是否已正確部署。`
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+/**
+ * @description 處理 HTTP POST 請求，並根據 URL 參數，將請求路由到不同的處理函式。
  * @param {Object} e - Apps Script 的事件物件。
  */
 function doPost(e) {
@@ -113,9 +141,11 @@ function doPost_Pdf(e) {
   }
 }
 
+// ============================= V38.1 函式修改 START =============================
 function doPost_Voice(e) {
   try {
     const params = JSON.parse(e.postData.contents);
+    // 【V38.1 升級】現在會讀取 target_sheet_id，若無則使用主帳本
     const targetSheetId = sanitizeSheetId(params.target_sheet_id || MAIN_LEDGER_ID);
     const voiceText = params.voice_text;
     
@@ -127,34 +157,86 @@ function doPost_Voice(e) {
     return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: `處理語音時發生錯誤: ${error.message}` })).setMimeType(ContentService.MimeType.JSON);
   }
 }
+// ============================= V38.1 函式修改 END ===============================
 
 // =================================================================================================
 // 自動化處理管道
 // =================================================================================================
 
-function syncPdfsFromGmail() {
+/**
+ * @description 【V36.2 新增】統一的郵件自動化處理入口。
+ * 這個函式會取代舊的 syncPdfsFromGmail 和 syncInvoicesFromGmail。
+ * 請為此函式設定時間觸發器。
+ */
+function processAutomatedEmails() {
   const processFolder = DriveApp.getFolderById(FOLDER_ID_TO_PROCESS);
-  VENDOR_QUERIES.forEach(query => {
-    const fullQuery = `${query} is:unread`;
+  const sanitizedMainLedgerId = sanitizeSheetId(MAIN_LEDGER_ID);
+  
+  EMAIL_PROCESSING_RULES.forEach(rule => {
+    const fullQuery = `${rule.query} is:unread`;
+    Logger.log(`正在搜尋郵件: "${fullQuery}"，處理類型: ${rule.type}`);
+    
     const threads = GmailApp.search(fullQuery);
     threads.forEach(thread => {
       const messages = thread.getMessages();
       messages.forEach(message => {
-        const attachments = message.getAttachments();
-        let pdfFound = false;
-        attachments.forEach(attachment => {
-          if (attachment.getContentType() === 'application/pdf') {
-            try {
-              processFolder.createFile(attachment);
-              pdfFound = true;
-            } catch (e) {
-              Logger.log(`儲存附件失敗: ${e.toString()}`);
+        
+        try {
+          // --- PDF 附件處理邏輯 ---
+          if (rule.type === 'PDF') {
+            const attachments = message.getAttachments();
+            if (attachments.length > 0) {
+              let pdfFound = false;
+              attachments.forEach(attachment => {
+                if (attachment.getContentType() === 'application/pdf') {
+                  processFolder.createFile(attachment);
+                  pdfFound = true;
+                }
+              });
+              if (pdfFound) {
+                 Logger.log(`找到 PDF 附件於郵件: ${message.getSubject()}`);
+                 message.markRead();
+              }
+            } else {
+               Logger.log(`規則為 PDF，但郵件 "${message.getSubject()}" 中未找到附件，跳過。`);
             }
           }
-        });
-        if (pdfFound) {
-          message.markRead();
+          // --- HTML 內文/附件處理邏輯 ---
+          else if (rule.type === 'HTML') {
+            let htmlContent = null;
+            let sourceDescription = "電子發票"; // 預設來源描述
+            const attachments = message.getAttachments();
+            
+            // 優先尋找 htm/html 附件
+            const htmlAttachment = attachments.find(att =>
+                att.getContentType() === MimeType.HTML ||
+                att.getName().toLowerCase().endsWith('.htm') ||
+                att.getName().toLowerCase().endsWith('.html')
+            );
+            
+            if (htmlAttachment) {
+                htmlContent = htmlAttachment.getDataAsString();
+                sourceDescription = `電子發票 (${htmlAttachment.getName()})`;
+                Logger.log(`找到 ${sourceDescription} 於郵件: ${message.getSubject()}`);
+            } else {
+                // 如果沒有 HTML 附件，才使用郵件內文
+                htmlContent = message.getBody();
+            }
+            
+            if (htmlContent) {
+                const invoiceData = parseInvoiceEmail(htmlContent);
+                // 【V38.0 升級】直接將解析出的資料，交給新的統一處理函式
+                processNewRecord(invoiceData, null, `HTML (${sourceDescription})`, sanitizedMainLedgerId, null);
+                message.markRead();
+
+            } else {
+                Logger.log(`規則為 HTML，但郵件 "${message.getSubject()}" 中找不到任何 HTML 內容（包括內文與附件），跳過。`);
+            }
+          }
+        } catch (e) {
+          Logger.log(`處理郵件失敗: ${e.toString()}. 主旨: ${message.getSubject()}`);
         }
+
       });
     });
   });
@@ -179,30 +261,6 @@ function checkReceiptsFolder() {
   }
 }
 
-function syncInvoicesFromGmail() {
-  const query = "from:invoice@einvoice.nat.gov.tw is:unread";
-  const threads = GmailApp.search(query);
-  const sanitizedMainLedgerId = sanitizeSheetId(MAIN_LEDGER_ID);
-  let successCount = 0;
-  threads.forEach(thread => {
-    const messages = thread.getMessages();
-    messages.forEach(message => {
-      if (message.isUnread()) {
-        try {
-          const invoiceData = parseInvoiceEmail(message.getBody());
-          if (invoiceData && invoiceData.invoiceNumber) {
-            if (writeToSheetFromEmail(invoiceData, sanitizedMainLedgerId)) {
-              successCount++;
-            }
-            message.markRead();
-          }
-        } catch (e) {
-          Logger.log(`處理郵件失敗: ${e.toString()}. 主旨: ${message.getSubject()}`);
-        }
-      }
-    });
-  });
-}
 
 // =================================================================================================
 // 核心處理函式
@@ -210,29 +268,22 @@ function syncInvoicesFromGmail() {
 
 function processImage(file, optionalVoiceNote, sheetId) {
   try {
-    const aiResult = callGeminiForVision(file.getBlob().getBytes(), optionalVoiceNote, file.getMimeType());
+    const aiResult = callGeminiForVision(file.getBlob(), optionalVoiceNote);
     const parsedData = JSON.parse(aiResult.text);
-    if (isDuplicate(parsedData, aiResult.rawText, sheetId)) {
-      const duplicatesFolder = DriveApp.getFolderById(FOLDER_ID_DUPLICATES);
-      file.moveTo(duplicatesFolder);
-      return;
-    }
     const source = optionalVoiceNote ? 'OCR+語音' : 'OCR';
-    writeToSheetFromOCR(parsedData, file.getUrl(), aiResult.rawText, aiResult.translation, source, sheetId);
-    const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
-    file.moveTo(archiveFolder);
-    Logger.log(`成功處理圖片檔案 ${file.getName()} 並寫入 Google Sheet (ID: ${sheetId})。`);
+    // 【V38.0 升級】所有新紀錄都通過統一的處理函式
+    processNewRecord(parsedData, file, source, sheetId, aiResult.rawText);
   } catch (error) {
     Logger.log(`[processImage Error] ${error.toString()} for file ${file.getName()}`);
+    handleFailedFile(error, file, sheetId);
   }
 }
 
 function processPdf(file, sheetId) {
   let pdfText;
-  let usedEngine = "備用引擎"; // 預設使用備用引擎
+  let usedEngine = "備用引擎";
 
   try {
-    // 步驟 1: 優先嘗試使用「主引擎」 (Document AI)
     if (GCP_PROJECT_ID && DOCUMENT_AI_PROCESSOR_ID) {
       Logger.log(`偵測到 Document AI 設定，嘗試使用主引擎處理檔案：${file.getName()}`);
       pdfText = callDocumentAIAPI(file.getBlob());
@@ -240,24 +291,19 @@ function processPdf(file, sheetId) {
     } else {
       throw new Error("Document AI 未設定，將使用備用引擎。");
     }
-
   } catch (docAiError) {
-    // 步驟 2: 如果主引擎失敗，自動降級並使用「備用引擎」
     Logger.log(`[${usedEngine} Error] ${docAiError.message}`);
     Logger.log(`自動切換至備用引擎來處理檔案：${file.getName()}`);
-    
     try {
       pdfText = extractPdfText(file);
       usedEngine = "備用引擎";
     } catch (fallbackError) {
-      // 如果連備用引擎都失敗了，進行智慧分流或歸檔
       Logger.log(`[備用引擎 Error] ${fallbackError.message}`);
       handleFailedFile(fallbackError, file, sheetId);
-      return; // 終止函式執行
+      return;
     }
   }
 
-  // 步驟 3: 使用提取出的文字，繼續後續的 AI 分析與寫入流程
   try {
     const textQuality = assessTextQuality(pdfText);
     Logger.log(`檔案 ${file.getName()} 的 PDF 文字品質評估: ${textQuality} (由 ${usedEngine} 產出)`);
@@ -269,21 +315,9 @@ function processPdf(file, sheetId) {
     const aiResult = callGeminiForPdfText(pdfText, textQuality);
     const parsedData = JSON.parse(aiResult);
     
-    if (isDuplicate(parsedData, pdfText, sheetId)) {
-      const duplicatesFolder = DriveApp.getFolderById(FOLDER_ID_DUPLICATES);
-      file.moveTo(duplicatesFolder);
-      Logger.log(`檔案 ${file.getName()} 偵測為重複紀錄，已移至重複資料夾。`);
-      return;
-    }
-    
-    const status = (parsedData.confidence === 'low' || textQuality === 'poor') ? '需人工確認' : '待確認';
-    
-    writeToSheetFromOCR(parsedData, file.getUrl(), pdfText, null, `PDF (${usedEngine})`, sheetId, status);
-    
-    const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
-    file.moveTo(archiveFolder);
-    
-    Logger.log(`成功處理 PDF: ${file.getName()}, 品質: ${textQuality}, AI信心度: ${parsedData.confidence}, 最終狀態: ${status}`);
+    const source = `PDF (${usedEngine})`;
+    // 【V38.0 升級】所有新紀錄都通過統一的處理函式
+    processNewRecord(parsedData, file, source, sheetId, pdfText);
   
   } catch (finalProcessingError) {
     Logger.log(`[最終處理階段 Error] 在分析文字或寫入表格時發生錯誤。檔案: ${file.getName()}, 錯誤: ${finalProcessingError.toString()}`);
@@ -291,100 +325,302 @@ function processPdf(file, sheetId) {
   }
 }
 
-/**
- * @description 【V35.8 新增】處理失敗檔案的輔助函式，實現智慧分流與歸檔
- * @param {Error} error - 捕捉到的錯誤物件
- * @param {File} file - 處理失敗的檔案物件
- * @param {string} sheetId - 目標工作表的 ID
- */
-function handleFailedFile(error, file, sheetId) {
-  Logger.log(`[handleFailedFile] 開始處理失敗的檔案 ${file.getName()}。錯誤: ${error.message}`);
-  
-  if (error.message.includes('不是有效的 PDF 檔案')) {
-    const mimeType = file.getMimeType();
-    if (mimeType === MimeType.JPEG || mimeType === MimeType.PNG) {
-      Logger.log(`偵測到偽裝成 PDF 的圖片 (${mimeType})，將轉交給圖片處理函式...`);
-      try {
-        processImage(file, null, sheetId);
-        return;
-      } catch (imageError) {
-        Logger.log(`[handleFailedFile -> processImage Error] 轉交處理圖片時發生新錯誤: ${imageError.toString()}`);
-      }
-    }
-  }
-  
-  Logger.log(`[handleFailedFile Error] 無法自動處理的錯誤，將檔案 ${file.getName()} 歸檔至錯誤資料夾。`);
-  try {
-    const errorFolder = DriveApp.getFolderById(FOLDER_ID_DUPLICATES);
-    file.moveTo(errorFolder);
-  } catch (moveError) {
-    Logger.log(`[handleFailedFile Fatal] 連移動檔案至錯誤資料夾都失敗了: ${moveError.toString()}`);
-  }
-}
-
-
+// ============================= V38.1 函式修改 START =============================
 function processVoice(voiceText, sheetId) {
   try {
     const aiResultText = callGeminiForVoice(voiceText);
     const parsedData = JSON.parse(aiResultText);
-    return writeToSheetFromVoice(parsedData, sheetId);
+     // 【V38.1 升級】所有新紀錄都通過統一的處理函式
+    const result = processNewRecord(parsedData, null, '語音', sheetId, voiceText);
+    return ContentService.createTextOutput(JSON.stringify({ status: result ? 'success' : 'error', data: parsedData })).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     Logger.log(`[processVoice Error] ${error.toString()} for text "${voiceText}"`);
     return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: `處理語音時發生錯誤: ${error.message}` })).setMimeType(ContentService.MimeType.JSON);
   }
 }
+// ============================= V38.1 函式修改 END ===============================
 
 
-// =================================================================================================
-// AI 與資料庫核心
-// =================================================================================================
 /**
- * @description 【V35.8 新增】主引擎：呼叫 Google Cloud Document AI API 來解析 PDF。
- * @param {Blob} pdfBlob - PDF 檔案的 Blob 物件。
- * @returns {string} 由 Document AI 提取出的高品質純文字。
+ * @description 【V38.0 新增】處理失敗檔案的輔助函式，實現智慧分流與歸檔
+ * @param {Error} error - 捕捉到的錯誤物件
+ * @param {File} file - 處理失敗的檔案物件
+ * @param {string} sheetId - 目標工作表的 ID
  */
-function callDocumentAIAPI(pdfBlob) {
-  const url = `https://us-documentai.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/us/processors/${DOCUMENT_AI_PROCESSOR_ID}:process`;
-
-  const requestBody = {
-    "skipHumanReview": true,
-    "rawDocument": {
-      "content": Utilities.base64Encode(pdfBlob.getBytes()),
-      "mimeType": "application/pdf"
-    }
-  };
-
-  const options = {
-    'method': 'post',
-    'contentType': 'application/json',
-    'headers': {
-      'Authorization': 'Bearer ' + ScriptApp.getOAuthToken()
-    },
-    'payload': JSON.stringify(requestBody),
-    'muteHttpExceptions': true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
-
-  if (responseCode !== 200) {
-    throw new Error(`Document AI API 呼叫失敗: ${responseCode} - ${responseText}`);
-  }
+function handleFailedFile(error, file, sheetId) {
+  Logger.log(`[handleFailedFile] 開始處理失敗的檔案 ${file ? file.getName() : 'N/A'}。錯誤: ${error.message}`);
   
-  const result = JSON.parse(responseText);
-  if (!result.document || !result.document.text) {
-    throw new Error('Document AI 回傳了非預期的結構，缺少 document.text 欄位。');
+  if (file) {
+    if (error && error.message && error.message.includes('不是有效的 PDF 檔案')) {
+      const mimeType = file.getMimeType();
+      if (mimeType === MimeType.JPEG || mimeType === MimeType.PNG) {
+        Logger.log(`偵測到偽裝成 PDF 的圖片 (${mimeType})，將轉交給圖片處理函式...`);
+        try {
+          processImage(file, null, sheetId);
+          return;
+        } catch (imageError) {
+          Logger.log(`[handleFailedFile -> processImage Error] 轉交處理圖片時發生新錯誤: ${imageError.toString()}`);
+        }
+      }
+    }
+    
+    Logger.log(`[handleFailedFile Error] 無法自動處理的錯誤，將檔案 ${file.getName()} 歸檔至錯誤資料夾。`);
+    try {
+      const errorFolder = DriveApp.getFolderById(FOLDER_ID_DUPLICATES);
+      file.moveTo(errorFolder);
+    } catch (moveError) {
+      Logger.log(`[handleFailedFile Fatal] 連移動檔案至錯誤資料夾都失敗了: ${moveError.toString()}`);
+    }
   }
-
-  Logger.log('成功透過 Document AI 取得高品質文字。');
-  return result.document.text;
 }
 
 
-function callGeminiForVision(fileBytes, voiceNote, mimeType) {
-  const prompt = `你是一位專業、細心的台灣在地記帳助理。請分析這份文件（可能是圖片或PDF），並嚴格按照以下單一 JSON 格式回傳結果...`; // 省略
-  const requestBody = { "contents": [{ "role": "user", "parts": [ { "text": prompt }, { "inline_data": { "mime_type": mimeType, "data": Utilities.base64Encode(fileBytes) }} ] }], "generationConfig": { "response_mime_type": "application/json" } };
+// =================================================================================================
+// 【V38.0 新增】資料關聯與擴充 (Data Reconciliation & Enrichment)
+// =================================================================================================
+
+// 資料來源的信任評分 (越高越可信)
+const SOURCE_TRUST_SCORES = {
+  'HTML': 10,
+  'PDF': 8,
+  'OCR': 6,
+  '語音': 4
+};
+
+
+/**
+ * @description 【V38.0 新增】統一處理所有新紀錄的入口函式。
+ * 它會先尋找關聯紀錄，如果找到就進行智慧合併，找不到才新增一筆。
+ * @param {object} newData - AI 解析出的新資料物件。
+ * @param {File} file - (可選) 相關的檔案物件 (圖片或PDF)。
+ * @param {string} source - 資料來源的描述 (例如 'PDF (主引擎)', 'OCR+語音')。
+ * @param {string} sheetId - 目標工作表的 ID。
+ * @param {string} rawText - 原始的文字內容，用於查重。
+ * @returns {boolean} 操作是否成功。
+ */
+function processNewRecord(newData, file, source, sheetId, rawText) {
+  try {
+    const sheet = SpreadsheetApp.openById(sheetId).getSheetByName(SHEET_NAME);
+    const relatedRecord = findRelatedRecord(newData, sheet, rawText);
+
+    if (relatedRecord) {
+      // --- 找到關聯紀錄 -> 進行更新 ---
+      Logger.log(`找到關聯紀錄於第 ${relatedRecord.rowIndex} 列，準備進行智慧合併。`);
+      const mergedData = enrichAndMergeData(newData, relatedRecord.data, source);
+      // setValues 期望一個二維陣列
+      sheet.getRange(relatedRecord.rowIndex, 1, 1, mergedData.length).setValues([mergedData]);
+      Logger.log(`成功更新第 ${relatedRecord.rowIndex} 列的紀錄。`);
+      
+      // 成功合併後，處理原始檔案
+      if (file) {
+        const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
+        file.moveTo(archiveFolder);
+        Logger.log(`檔案 ${file.getName()} 已被成功處理並封存。`);
+      }
+
+    } else {
+      // --- 找不到關聯紀錄 -> 新增一筆 ---
+      Logger.log(`未找到關聯紀錄，將新增一筆紀錄。`);
+      const status = (newData.confidence === 'low') ? '需人工確認' : '待確認';
+      const fileUrl = file ? file.getUrl() : null;
+      writeToSheet(newData, fileUrl, rawText, null, source, sheetId, status);
+      
+      if (file) {
+        const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
+        file.moveTo(archiveFolder);
+      }
+    }
+    return true;
+
+  } catch (error) {
+    Logger.log(`[processNewRecord Error] 處理新紀錄時發生錯誤: ${error.toString()}`);
+    if (file) {
+      handleFailedFile(error, file, sheetId);
+    }
+    return false;
+  }
+}
+
+/**
+ * @description 【V38.0 新增】在表格中尋找與新紀錄相關的舊紀錄。
+ * @param {object} newData - AI 解析出的新資料物件。
+ * @param {Sheet} sheet - 目標工作表物件。
+ * @param {string} newRawText - 新紀錄的原始文字。
+ * @returns {object|null} 如果找到，回傳 {rowIndex, data} 物件；否則回傳 null。
+ */
+function findRelatedRecord(newData, sheet, newRawText) {
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+
+  // Column indices (0-based)
+  const COLS = {
+    TIMESTAMP: 0,
+    AMOUNT: 1,
+    INVOICE_NUMBER: 8,
+    RAW_TEXT: 17
+  };
+
+  // 策略一：使用「黃金鑰匙」- 發票號碼進行精準匹配
+  if (newData.invoiceNumber) {
+    for (let i = 1; i < values.length; i++) {
+      if (values[i][COLS.INVOICE_NUMBER] === newData.invoiceNumber) {
+        return { rowIndex: i + 1, data: values[i] };
+      }
+    }
+  }
+
+  // 策略二：使用「模糊鑰匙」- 日期、金額、內容相似度
+  const newDate = new Date(newData.timestamp);
+  const newAmount = parseFloat(newData.amount);
+
+  for (let i = 1; i < values.length; i++) {
+    const existingRow = values[i];
+    const existingDate = new Date(existingRow[COLS.TIMESTAMP]);
+    const existingAmount = parseFloat(existingRow[COLS.AMOUNT]);
+    
+    // Skip if essential data is missing
+    if (!existingDate || isNaN(existingAmount)) continue;
+
+    // Check for same day and similar amount
+    const timeDiff = Math.abs(newDate.getTime() - existingDate.getTime());
+    const dayDiff = timeDiff / (1000 * 3600 * 24);
+    
+    if (dayDiff < 1 && Math.abs(newAmount - existingAmount) < 0.01) {
+      // If raw text is available for both, check similarity
+      const existingRawText = existingRow[COLS.RAW_TEXT];
+      if (newRawText && existingRawText) {
+        const similarity = 1 - (levenshtein(newRawText, existingRawText) / Math.max(newRawText.length, existingRawText.length));
+        if (similarity > 0.85) { // A slightly lower threshold for merging
+           return { rowIndex: i + 1, data: existingRow };
+        }
+      } else {
+        // If one of them lacks raw text, we consider it a match based on date/amount alone
+        return { rowIndex: i + 1, data: existingRow };
+      }
+    }
+  }
+  
+  return null; // No related record found
+}
+
+/**
+ * @description 【V38.0 新增】智慧合併新舊兩筆紀錄的資料。
+ * @param {object} newData - 新的資料物件。
+ * @param {Array} oldRowData - 表格中舊的那一列資料。
+ * @param {string} newSource - 新資料的來源描述。
+ * @returns {Array} 合併後的、準備好寫回表格的一維陣列。
+ */
+function enrichAndMergeData(newData, oldRowData, newSource) {
+  // Deep copy the old row data to avoid modifying it directly
+  let mergedRow = [...oldRowData];
+
+  const COLS = {
+    TIMESTAMP: 0,
+    AMOUNT: 1,
+    CURRENCY: 2,
+    CATEGORY: 5,
+    ITEM: 6,
+    INVOICE_NUMBER: 8,
+    REFERENCE_NUMBER: 9,
+    SOURCE: 15,
+    NOTES: 16,
+    RAW_TEXT: 17
+  };
+
+  const oldSource = mergedRow[COLS.SOURCE] || '未知';
+  const newTrust = SOURCE_TRUST_SCORES[newSource.split(' ')[0]] || 0;
+  const oldTrust = SOURCE_TRUST_SCORES[oldSource.split(' ')[0]] || 0;
+
+  // --- 欄位合併邏輯 ---
+  // 如果新資料的信任度更高，就用新的品項和分類覆蓋舊的
+  if (newTrust > oldTrust) {
+    if (newData.item) mergedRow[COLS.ITEM] = newData.item;
+    if (newData.category) mergedRow[COLS.CATEGORY] = newData.category;
+  }
+
+  // 補充缺失的資訊 (如果原來是空的，就用新的填上)
+  if (!mergedRow[COLS.INVOICE_NUMBER] && newData.invoiceNumber) {
+    mergedRow[COLS.INVOICE_NUMBER] = newData.invoiceNumber;
+  }
+  if (!mergedRow[COLS.REFERENCE_NUMBER] && newData.referenceNumber) {
+    mergedRow[COLS.REFERENCE_NUMBER] = newData.referenceNumber;
+  }
+  
+  // 合併備註
+  const oldNotes = mergedRow[COLS.NOTES] || '';
+  const newNotes = newData.notes || '';
+  if (newNotes && !oldNotes.includes(newNotes)) {
+    mergedRow[COLS.NOTES] = oldNotes ? `${oldNotes}; ${newNotes}` : newNotes;
+  }
+  
+  // 更新來源，讓使用者知道這筆資料被擴充了
+  mergedRow[COLS.SOURCE] = `${oldSource} (+${newSource})`;
+  
+  return mergedRow;
+}
+
+
+// =================================================================================================
+// AI 呼叫函式
+// =================================================================================================
+
+function callGeminiForVision(imageBlob, voiceNote) {
+  const promptLines = [
+    '你是一位專業、吹毛求疵的台灣記帳助理。你的任務是分析一張收據或發票的圖片，並結合一段可選的語音備註，提取出結構化的記帳資訊。',
+    '',
+    '---',
+    '**【最高指導原則】**',
+    '1. **主要資訊來源**: 圖片是主要資訊來源。請從圖片中提取日期、金額、品項、店家名稱等所有關鍵資訊。',
+    '2. **語音備註用途**: 語音備註是用來補充情境的。請將語音備註的內容，填入 `notes` 欄位。如果語音備註能幫助你判斷 `item` (品項)，也可以用來豐富品項描述。',
+    '3. **JSON 輸出結構**: 你**必須**回傳一個包含兩個頂層鍵的 JSON 物件: `structuredData` 和 `rawText`。',
+    '   - `structuredData`: 包含所有結構化的記帳欄位。',
+    '   - `rawText`: 包含從圖片中 OCR 辨識出的**完整**原始文字。',
+    '',
+    '---',
+    '**【`structuredData` 的詳細規則】**',
+    '**1. 日期 (timestamp)**: 從圖片中找到的交易日期與時間，格式化為 **`YYYY-MM-DDTHH:mm:ss`** 的 ISO 8601 標準格式。如果圖片中找不到確切時間，則使用 `00:00:00` 作為時間。',
+    '**2. 金額 (amount)**: 從圖片中找到的總金額，只回傳純數字，並保留原始的小數點。',
+    '**3. 分類 (category)**: **必須**從固定清單中選擇：[\'食\', \'衣\', \'住\', \'行\', \'育\', \'樂\', \'帳單\', \'其他\']。',
+    '**4. 格式要求**: 找不到的欄位請填入 null。',
+    '',
+    '---',
+    '**【學習範例】**',
+    '',
+    '**範例 1: 圖片 + 語音備註**',
+    '[輸入圖片]:一張八方雲集的發票圖片，內容有品項、總金額160元、發票號碼HW86105671、日期2025/02/02、時間 13:21:34。',
+    '[輸入語音備註]: "中午吃的鍋貼"',
+    '[輸出 JSON]',
+    '{',
+    '  "structuredData": {',
+    '    "timestamp": "2025-02-02T13:21:34",',
+    '    "amount": 160,',
+    '    "currency": "TWD",',
+    '    "category": "食",',
+    '    "item": "八方雲集",',
+    '    "invoiceNumber": "HW86105671",',
+    '    "referenceNumber": null,',
+    '    "notes": "中午吃的鍋貼"',
+    '  },',
+    '  "rawText": "八方雲集...HW86105671...總計 160...時間 13:21:34..."',
+    '}',
+    '---',
+    '',
+    '**【你的任務】**',
+    '現在，請處理以下新的圖片與語音備註。',
+    `[輸入語音備註]: "${voiceNote || '無'}"`
+  ];
+  const prompt = promptLines.join('\n');
+  
+  const requestBody = {
+    "contents": [{
+      "parts": [
+        { "text": prompt },
+        { "inline_data": { "mime_type": imageBlob.getContentType(), "data": Utilities.base64Encode(imageBlob.getBytes()) }}
+      ]
+    }],
+    "generationConfig": { "response_mime_type": "application/json" }
+  };
+
   const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(requestBody), 'muteHttpExceptions': true };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
   
@@ -403,10 +639,12 @@ function callGeminiForVision(fileBytes, voiceNote, mimeType) {
     
     const fullResponse = jsonResponse.candidates[0].content.parts[0].text;
     const parsedJson = JSON.parse(fullResponse);
+    
+    // 檢查回傳的 JSON 是否符合我們要求的嚴格結構
     if (parsedJson.structuredData && 'rawText' in parsedJson) {
-      return { text: JSON.stringify(parsedJson.structuredData), rawText: parsedJson.rawText, translation: parsedJson.translation || null };
+      return { text: JSON.stringify(parsedJson.structuredData), rawText: parsedJson.rawText, translation: null };
     } else {
-       throw new Error("AI 回應的 JSON 結構不符合預期。");
+       throw new Error("AI 回應的 JSON 結構不符合預期 (缺少 structuredData 或 rawText 鍵)。");
     }
   } catch (e) {
     Logger.log(`callGeminiForVision 解析 JSON 失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
@@ -414,9 +652,8 @@ function callGeminiForVision(fileBytes, voiceNote, mimeType) {
   }
 }
 
-// ============================= V36.1 函式修改 START =============================
+
 function callGeminiForPdfText(pdfText, textQuality) {
-  // 如果傳入的文字為空或只有空白，直接回傳一個表示失敗的 JSON，避免浪費 API call
   if (!pdfText || pdfText.trim() === '') {
     return JSON.stringify({
       timestamp: null, amount: null, currency: null, category: null, item: null,
@@ -427,43 +664,41 @@ function callGeminiForPdfText(pdfText, textQuality) {
     });
   }
 
-  // 【V36.1 修正】改用陣列組合字串，避免 template literal 在特定環境下的解析問題。
   const promptLines = [
     '你是一位專業、吹毛求疵的台灣記帳助理。你的任務是從高品質的 PDF 文字中，學習範例，並提取出結構化的記帳資訊。',
     '',
     '---',
-    '**【規則指令區】**',
-    '請嚴格遵守以下所有規則：',
-    '',
-    '**1. 日期 (timestamp) 提取規則:**',
-    '   - **優先序**: 請嚴格按照以下順序尋找日期：**1. 付款日期 (Payment Date)** > 2. 開立日期 (Issue Date)。',
-    '   - **忽略**: 請明確忽略「入住日期 (Check-in Date)」或「航班日期」等非付款性質的日期。',
-    "   - **格式**: 最終日期必須格式化為 'YYYY-MM-DD'。",
-    '',
-    '**2. 金額 (amount) 處理規則:**',
-    '   - **提取**: 從「總計」、「總金額」、「Total」等關鍵字尋找金額，並只回傳純數字。',
-    "   - **整數處理**: 如果幣別 (currency) 是 **'TWD'** 或 **'JPY'**，請將提取出的數字**四捨五入到最接近的整數**。",
-    "   - **小數處理**: 對於 'USD', 'EUR' 等其他貨幣，請保留小數點後兩位。",
-    '',
-    '**3. 分類 (category) 選擇規則:**',
-    "   - **固定選項**: `category` 欄位**必須**從以下清單中選擇一個：['食', '衣', '住', '行', '育', '樂', '帳單', '其他']。",
-    '   - **禁止**: 不要創造清單以外的新分類。',
-    '',
-    '**4. 格式要求**: ',
-    '   - **務必**、**只能**回傳一個單一的、無任何其他前後文字的 JSON 物件。找不到的欄位請填入 null。',
+    '**【最高指導原則：日期判斷的思維鏈】**',
+    '在決定最終的 `timestamp` 前，你必須在內心完成以下思考，並將此邏輯應用於所有判斷：',
+    '1. **找出所有日期**：掃描文件，列出所有看起來像日期的文字 (例如 "付款日期 June 18, 2025", "入住期間 June 30, 2025", "開立日期:6月 15, 2025")。',
+    '2. **評估優先級**：根據「**付款日期 (Payment Date)**」 > 「**開立日期 (Issue Date)**」這個優先級進行排序。',
+    '3. **做出決策與解釋**：選擇優先級最高的日期作為 `timestamp`。同時，明確地忽略其他日期，並知道忽略它們的原因（例如，「我忽略了 June 30，因為它是入住日期，而非付款發生的時間點」）。',
     '',
     '---',
-    '**【範例學習區塊】**',
-    '以下是兩個你需要學習的範例，請理解其邏輯，並應用到新的文字上。',
+    '**【其他重要規則】**',
+    '**1. 日期與時間 (timestamp)**: 將選擇的日期，格式化為 **`YYYY-MM-DDTHH:mm:ss`** 的 ISO 8601 標準格式。如果找不到確切時間，則使用 `00:00:00` 作為時間。',
+    '**2. 金額 (amount):**',
+    '   - 從「總計」、「總金額」、「Total」等關鍵字尋找金額，並只回傳純數字。',
+    "   - **忠實記錄**：請忠實地記錄數字，**不要**對 TWD 或 JPY 進行四捨五入。保留原始的小數點。",
     '',
-    '**範例 1: 住宿收據**',
+    '**3. 分類 (category):**',
+    "   - **必須**從固定清單中選擇：['食', '衣', '住', '行', '育', '樂', '帳單', '其他']。",
+    '   - 禁止創造新分類。住宿歸類為「住」，機票歸類為「行」。',
+    '',
+    '**4. 格式要求**: ',
+    '   - **務必**、**只能**回傳一個單一的 JSON 物件。找不到的欄位請填入 null。',
+    '',
+    '---',
+    '**【學習範例】**',
+    '以下範例體現了上述所有規則，特別是日期判斷的思維鏈。',
+    '',
+    '**範例 1: 住宿收據 (多日期)**',
     '[輸入文字]',
-    '"付款日期 June 18, 2025\\n收據\\n客人姓名&地址\\n姓名\\nPo Fu Chiang\\n預訂住宿名稱\\nVessel Inn Sakae Station\\n入住期間\\nJune 30, 2025 - July 4, 2025 (4晚)\\n總金額\\nTWD 8,286.06"',
-    '',
+    '"付款日期 June 18, 2025\\n收據\\n入住期間\\nJune 30, 2025 - July 4, 2025\\n總金額\\nTWD 8,286.06"',
     '[輸出 JSON]',
     '{',
-    '  "timestamp": "2025-06-18",',
-    '  "amount": 8286,',
+    '  "timestamp": "2025-06-18T00:00:00",',
+    '  "amount": 8286.06,',
     '  "currency": "TWD",',
     '  "category": "住",',
     '  "item": "Vessel Inn Sakae Station",',
@@ -474,14 +709,13 @@ function callGeminiForPdfText(pdfText, textQuality) {
     '  "rawTextQuality": "good"',
     '}',
     '',
-    '**範例 2: 航班收據**',
+    '**範例 2: 航班收據 (單一有效日期)**',
     '[輸入文字]',
-    '"收據\\n開立日期:6月 15, 2025\\n乘客: Po Fu Chiang\\n航班資訊\\nCathay Pacific\\nCX 531\\n預訂編號: 1620934638\\n總金額\\nTWD 22081.85"',
-    '',
+    '"收據\\n開立日期:6月 15, 2025\\n預訂編號: 1620934638\\n總金額\\nTWD 22081.85"',
     '[輸出 JSON]',
     '{',
-    '  "timestamp": "2025-06-15",',
-    '  "amount": 22082,',
+    '  "timestamp": "2025-06-15T00:00:00",',
+    '  "amount": 22081.85,',
     '  "currency": "TWD",',
     '  "category": "行",',
     '  "item": "Cathay Pacific 航班",',
@@ -494,7 +728,7 @@ function callGeminiForPdfText(pdfText, textQuality) {
     '---',
     '',
     '**【你的任務】**',
-    '現在，請處理以下新的文字，並遵循上述所有規則與範例邏輯，回傳一個 JSON 物件。',
+    '現在，請處理以下新的文字，並應用「思維鏈」邏輯與所有規則，回傳一個 JSON 物件。',
     '',
     '[高品質 PDF 文字內容開始]',
     pdfText,
@@ -524,7 +758,6 @@ function callGeminiForPdfText(pdfText, textQuality) {
     if (!jsonResponse.candidates || !jsonResponse.candidates[0].content.parts[0].text) { throw new Error(`Unexpected Gemini API response structure.`); }
     const aiResultText = jsonResponse.candidates[0].content.parts[0].text;
     
-    // 再次驗證 AI 回傳的是否為可解析的 JSON
     JSON.parse(aiResultText);
     return aiResultText;
 
@@ -533,11 +766,66 @@ function callGeminiForPdfText(pdfText, textQuality) {
     throw new Error(`Failed to process PDF text via API: ${e.message}`);
   }
 }
-// ============================= V36.1 函式修改 END ===============================
 
-
+// ============================= V38.1 函式修改 START =============================
 function callGeminiForVoice(voiceText) {
-  const prompt = `你是一位非常嚴謹、只會遵循規則的記帳助理...`; // 省略
+  // 建立一個參考時間，讓 AI 知道 "今天" 是哪一天
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  const promptLines = [
+    '你是一位專業、嚴謹的台灣記帳助理。你的任務是從一句日常的中文對話中，提取出結構化的記帳資訊。',
+    '',
+    '---',
+    '**【規則指令】**',
+    '1.  **日期與時間 (timestamp)**: ',
+    '    - **解析**: 請盡力從句子中解析日期與時間。例如「昨天早上十點」、「剛剛」、「中午」、「5/10 晚上八點」。',
+    '    - **預設**: 如果句子中完全沒有提到日期，才使用今天的日期 `' + today + '`。如果沒有提到時間，則使用 `00:00:00`。',
+    '    - **格式**: 最終格式必須是 **`YYYY-MM-DDTHH:mm:ss`** 的 ISO 8601 標準格式。',
+    '2.  **金額 (amount)**: 請只提取數字部分，忽略任何貨幣符號或單位 (如 $, 元, 新台幣)。',
+    '3.  **幣別 (currency)**: 如果沒有特別說明，一律預設為 \'TWD\'。',
+    '4.  **分類 (category)**: **必須**從固定清單中選擇一個最相近的：[\'食\', \'衣\', \'住\', \'行\', \'育\', \'樂\', \'帳單\', \'其他\']。',
+    '5.  **品項 (item)**: 提取出消費的主要商品或店家名稱。',
+    '6.  **備註 (notes)**: 將原始的輸入句子完整地放入此欄位。',
+    '7.  **格式要求**: **務必**、**只能**回傳一個單一的、無任何其他前後文字的 JSON 物件。',
+    '',
+    '---',
+    '**【學習範例】**',
+    '',
+    '**範例 1:**',
+    '[輸入文字]',
+    '"今天早上在7-Eleven買煙花了新台幣$110用的是Line Pay"',
+    '[輸出 JSON]',
+    `{
+  "timestamp": "${today}T09:00:00",
+  "amount": 110,
+  "currency": "TWD",
+  "category": "其他",
+  "item": "7-Eleven 買煙",
+  "notes": "今天早上在7-Eleven買煙花了新台幣$110用的是Line Pay"
+}`,
+    '',
+    '**範例 2:**',
+    '[輸入文字]',
+    '"昨天晚上八點搭計程車250元"',
+    '[輸出 JSON]',
+    `{
+  "timestamp": "${new Date(new Date().setDate(new Date().getDate()-1)).toISOString().slice(0,10)}T20:00:00",
+  "amount": 250,
+  "currency": "TWD",
+  "category": "行",
+  "item": "計程車",
+  "notes": "昨天晚上八點搭計程車250元"
+}`,
+    '---',
+    '',
+    '**【你的任務】**',
+    '現在，請處理以下新的文字，並遵循上述所有規則與範例邏輯，回傳一個 JSON 物件。',
+    '',
+    '[輸入文字]',
+    voiceText
+  ];
+  const prompt = promptLines.join('\n');
+
   const requestBody = { "contents": [{ "parts":[{ "text": prompt }] }], "generationConfig": { "response_mime_type": "application/json" } };
   const options = { 'method' : 'post', 'contentType': 'application/json', 'payload' : JSON.stringify(requestBody), 'muteHttpExceptions': true };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
@@ -562,11 +850,19 @@ function callGeminiForVoice(voiceText) {
       throw new Error(`Failed to process voice API call: ${e.message}`);
   }
 }
+// ============================= V38.1 函式修改 END ===============================
 
 
-function writeToSheetFromOCR(data, fileUrl, rawText, translation, source, sheetId, customStatus = '待確認') {
-  const cleanSheetId = sanitizeSheetId(sheetId);
-  const sheet = SpreadsheetApp.openById(cleanSheetId).getSheetByName(SHEET_NAME);
+function writeToSheet(data, fileUrl, rawText, translation, source, sheetId, customStatus = '待確認') {
+  let sheet;
+  try {
+    const cleanSheetId = sanitizeSheetId(sheetId);
+    sheet = SpreadsheetApp.openById(cleanSheetId).getSheetByName(SHEET_NAME);
+  } catch (e) {
+    Logger.log(`[writeToSheet Error] 無法開啟指定的 Google Sheet ID: '${sheetId}'。`);
+    return false;
+  }
+
   const rate = getExchangeRate(data.currency || 'TWD');
   const amountTWD = (data.currency === 'TWD' || !data.currency) ? data.amount : (data.amount * rate);
   
@@ -583,21 +879,21 @@ function writeToSheetFromOCR(data, fileUrl, rawText, translation, source, sheetI
     data.referenceNumber || null,
     null, null, null,
     fileUrl,
-    customStatus,  // 使用動態狀態
+    customStatus,
     source,
     data.notes || null,
     rawText,
     translation
   ];
   sheet.appendRow(row);
+  return true;
 }
 
 
-function writeToSheetFromEmail(data, sheetId) {
-  // 【V35.4 修正】新增防呆機制，防止因無效的 data 物件傳入而導致程式崩潰。
+function writeToSheetFromEmail(data, sheetId, source = '電子發票') {
   if (!data || typeof data.invoiceNumber === 'undefined') {
     Logger.log(`[writeToSheetFromEmail Warning] 函式被呼叫時，傳入的 data 物件無效或缺少 invoiceNumber。 Data: ${JSON.stringify(data)}`);
-    return false; // 直接返回，不執行後續操作
+    return false;
   }
 
   const cleanSheetId = sanitizeSheetId(sheetId);
@@ -614,26 +910,20 @@ function writeToSheetFromEmail(data, sheetId) {
   const row = [
     data.timestamp, data.amount, data.currency, 1, amountTWD,
     '其他', data.item, '私人', data.invoiceNumber, null, null, null, null, null,
-    '待確認', '電子發票', `由 ${data.item} 開立`, null, null
+    '待確認', source, `由 ${data.item} 開立`, null, null
   ];
   sheet.appendRow(row);
   return true;
 }
 
-function writeToSheetFromVoice(data, sheetId) {
-  const cleanSheetId = sanitizeSheetId(sheetId);
-  const sheet = SpreadsheetApp.openById(cleanSheetId).getSheetByName(SHEET_NAME);
-  const rate = getExchangeRate(data.currency || 'TWD');
-  const amountTWD = (data.currency === 'TWD' || !data.currency) ? data.amount : (data.amount * rate);
-  
-  const row = [
-    data.timestamp ? new Date(data.timestamp) : new Date(), data.amount || null, data.currency || 'TWD',
-    rate, amountTWD || null, data.category || '其他', data.item || null, '私人',
-    null, null, null, null, null, null, '待確認', '語音', data.notes || null, null, null
-  ];
-  sheet.appendRow(row);
+// ============================= V38.1 函式修改 START =============================
+function writeToSheetFromVoice(data, sheetId, originalVoiceText) {
+  // 【V38.1 升級】直接將解析後的資料，交給統一的 processNewRecord 處理
+  // 這樣語音記帳也能享受到「智慧合併」的好處
+  processNewRecord(data, null, '語音', sheetId, originalVoiceText);
   return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: data })).setMimeType(ContentService.MimeType.JSON);
 }
+// ============================= V38.1 函式修改 END ===============================
 
 
 function isDuplicate(data, rawText, sheetId) {
@@ -694,12 +984,9 @@ function extractPdfText(file) {
     const pdfBlob = file.getBlob();
     const pdfBytes = pdfBlob.getBytes();
     
-    // V35.6 修正：讀取前 1024 bytes，使其更具彈性，以應對開頭有非標準字元的 PDF。
     const sampleBytes = pdfBytes.slice(0, 1024);
-    // V35.7 修正：將無效編碼 "Latin-1" 更正為標準的 "ISO-8859-1"。
     const sampleHeaderText = Utilities.newBlob(sampleBytes).getDataAsString("ISO-8859-1");
     
-    // PDF 的 "Magic Number" 是 "%PDF"。我們在取樣的文字中搜尋它。
     if (sampleHeaderText.indexOf('%PDF') === -1) {
        throw new Error(`檔案 ${file.getName()} 的檔案標頭中找不到 '%PDF' 標記，不是有效的 PDF 檔案。`);
     }
@@ -710,7 +997,7 @@ function extractPdfText(file) {
     for (const encoding of encodings) {
       try {
         const text = pdfBlob.getDataAsString(encoding);
-        if (text && text.length > bestText.length && !text.includes('�')) {
+        if (text && text.length > bestText.length && !text.includes('')) {
           bestText = text;
         }
       } catch (e) {
@@ -741,7 +1028,7 @@ function extractPdfText(file) {
 function assessTextQuality(text) {
   if (!text || text.trim() === '') return 'empty';
   
-  const garbledChars = text.match(/[�]/g);
+  const garbledChars = text.match(/[]/g);
   const totalChars = text.length;
   const garbledRatio = garbledChars ? garbledChars.length / totalChars : 0;
   
