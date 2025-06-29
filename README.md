@@ -3,6 +3,7 @@
 **[中文]**
 一個可自託管的、由 AI 驅動的個人生活數據自動化框架。
 
+**[English]**
 An AI-driven, self-hostable framework for personal life-data automation.
 
 ---
@@ -17,7 +18,7 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
 
 ### 核心功能 / Core Features
 
-* **🧠 多模態 AI 輸入 (Multi-Modal AI Input):** 統一處理圖片、語音、PDF、郵件等多種數據源。
+* **🧠 兩段式 AI 引擎 (Two-Pass AI Engine):** 採用革命性的「提取-正規化」架構，第一層 AI 負責最大化提取資訊，第二層 AI 負責將其轉換為標準格式，極大提升了對複雜單據的辨識成功率與穩定性。
 * **✨ 智慧合併引擎 (Smart Reconciliation Engine):** 獨家的 `processNewRecord` 邏輯，能自動合併關聯紀錄、補充缺失資訊，徹底解決重複記帳問題。
 * **⚙️ 動態規則引擎 (Dynamic Rule Engine):** 所有郵件處理規則都在 Google Sheets 中進行設定，無需修改程式碼。
 * **🔔 彈性通報中心 (Flexible Notification Hub):** 可在 Google Sheets 中自訂錯誤通知渠道 (Email, Webhook for Slack/Discord) 和等級。
