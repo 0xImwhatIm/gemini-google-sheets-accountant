@@ -1,27 +1,26 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V39.4 - 元數據增強版 (Meta Data Enhancement)
+// 版本：V40.0 - 交易列表處理版 (Transaction List Processing)
 // 作者：0ximwhatim & Gemini
 // 最後更新：2025-06-30
-// 說明：此版本引入了「元數據 (Meta Data)」儲存機制。
-//      - 在 callGeminiForVision 中，系統除了提取和正規化核心記帳數據外，
-//        還會將 AI 提供的所有附加資訊（如 address, telephone）打包成 JSON 字串。
-//      - writeToSheet 函式新增了對 metaData 的處理，將其寫入新的 META_DATA 欄位，
-//        為未來「一張收據是一段回憶」等功能奠定數據基礎。
+// 說明：此版本為重大功能升級，引入了處理交易列表（如 IC 卡消費紀錄）的能力。
+//      - processImage 函式升級為智慧分流器，能判斷 AI 結果是單筆還是列表。
+//      - 新增 processImageAsTransactionList 函式，專門處理交易列表，並能區分「費用」與「內部轉帳」。
+//      - callGeminiForVision 的 Prompt 進行了重大升級，現在能識別交易列表並為每筆交易定性 (EXPENSE/TRANSFER)。
 // =================================================================================================
 
 // =================================================================================================
 // 【使用者設定區】
 // =================================================================================================
-const MAIN_LEDGER_ID = 'YOUR_MAIN_SPREADSHEET_ID_HERE';
+const MAIN_LEDGER_ID = '1-f_4_YJ2gA3gZ6c_j9R4o3rF9pD3sW6zY2xV1bE0a9c';
 const SHEET_NAME = 'All Records';
 const SETTINGS_SHEET_NAME = 'Settings';
-const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
-const GCP_PROJECT_ID = 'YOUR_GCP_PROJECT_ID_HERE';
-const DOCUMENT_AI_PROCESSOR_ID = 'YOUR_DOC_AI_PROCESSOR_ID_HERE';
-const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_PROCESSING';
-const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVING';
-const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES';
+const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE'; // 請填入您的 Gemini API 金鑰
+const GCP_PROJECT_ID = 'YOUR_GCP_PROJECT_ID_HERE'; // 請填入您的 Google Cloud 專案 ID
+const DOCUMENT_AI_PROCESSOR_ID = 'YOUR_DOC_AI_PROCESSOR_ID_HERE'; // 請填入您的 Document AI 處理器 ID
+const FOLDER_ID_TO_PROCESS = '1iA8o_yG7wY2kR_l5nX8sZ9hA0fE3bC1d';
+const FOLDER_ID_ARCHIVE = '1oV9xZ8tY_jL2nC5kR_bA7gD6fE2sW3aB';
+const FOLDER_ID_DUPLICATES = '1wE7rF4kG_jA9bC3lZ_sY8xV6nO5pD2qR';
 
 // =================================================================================================
 // 【V35.0 核心】多入口路由
@@ -335,17 +334,83 @@ function checkReceiptsFolder() {
 // =================================================================================================
 // 核心處理函式
 // =================================================================================================
+// ============================= V40.0 TRANSACTION LIST START =============================
 function processImage(file, optionalVoiceNote, sheetId) {
   try {
     const aiResult = callGeminiForVision(file.getBlob(), optionalVoiceNote);
-    const parsedData = JSON.parse(aiResult.text);
-    const source = optionalVoiceNote ? 'OCR+語音' : 'OCR';
-    processNewRecord(parsedData, file, source, sheetId, aiResult.rawText, aiResult.metaData);
+    
+    // 智慧分流器：判斷 AI 回傳的是單筆記錄還是交易列表
+    if (aiResult.transactions && Array.isArray(aiResult.transactions)) {
+      // 如果是交易列表，交給新的專屬函式處理
+      Logger.log("偵測到交易列表，啟動列表處理模式...");
+      processImageAsTransactionList(aiResult.transactions, file, optionalVoiceNote, sheetId);
+    } else {
+      // 否則，按照原有的單筆記錄流程處理
+      Logger.log("偵測到單筆收據，啟動標準處理模式...");
+      const parsedData = JSON.parse(aiResult.text);
+      const source = optionalVoiceNote ? 'OCR+語音' : 'OCR';
+      processNewRecord(parsedData, file, source, sheetId, aiResult.rawText, aiResult.metaData);
+    }
   } catch (error) {
     Logger.log(`[processImage Error] ${error.toString()} for file ${file.getName()}`);
     handleFailedFile(error, file, sheetId);
   }
 }
+
+function processImageAsTransactionList(transactions, file, optionalVoiceNote, sheetId) {
+  let totalExpense = 0;
+  const currency = 'JPY'; // 假設 IC 卡皆為日幣
+
+  transactions.forEach(tx => {
+    // 從 AI 回傳的交易中提取並正規化資料
+    const amount = parseFloat(String(tx.amount).replace(/[^0-9.-]+/g,""));
+    const description = tx.description || '未知交易';
+
+    let category = '行'; // 預設為交通
+    let notes = `[列表交易] ${description}`;
+    if(optionalVoiceNote) {
+      notes += ` | 備註: ${optionalVoiceNote}`;
+    }
+
+    // 根據交易類型進行會計分錄
+    if (tx.transaction_type === 'TRANSFER') {
+      category = '內部轉帳';
+      notes = `[列表交易] IC卡儲值: ${description}`;
+    } else if (tx.transaction_type === 'EXPENSE') {
+      // 只將費用支出計入總和
+      totalExpense += Math.abs(amount);
+    }
+
+    const newData = {
+      timestamp: tx.date ? new Date(tx.date) : new Date(),
+      amount: Math.abs(amount),
+      currency: currency,
+      category: category,
+      item: description,
+      invoiceNumber: null,
+      referenceNumber: null,
+      notes: notes
+    };
+    
+    // 為每一筆交易呼叫 processNewRecord
+    processNewRecord(newData, null, 'OCR (列表)', sheetId, JSON.stringify(tx), null);
+  });
+  
+  // 處理完成後，封存原始截圖檔案
+  if (file) {
+    const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
+    file.moveTo(archiveFolder);
+    Logger.log(`交易列表截圖 ${file.getName()} 已被成功處理並封存。`);
+  }
+  
+  // 發送一個總結通知
+  if (totalExpense > 0) {
+    const summaryMessage = `今日 IC 卡交通費總支出為 ${totalExpense} ${currency}。共處理了 ${transactions.length} 筆交易。`;
+    sendNotification('IC 卡交易匯總', summaryMessage, 'INFO');
+  }
+}
+
+// ============================= V40.0 TRANSACTION LIST END ===============================
 
 function processPdf(file, sheetId) {
   let pdfText;
@@ -449,7 +514,7 @@ function handleFailedFile(error, file, sheetId) {
 // =================================================================================================
 // 【V38.0 新增】資料關聯與擴充 (Data Reconciliation & Enrichment)
 // =================================================================================================
-const SOURCE_TRUST_SCORES = { 'HTML': 10, 'PDF': 8, 'OCR': 6, '語音': 4 };
+const SOURCE_TRUST_SCORES = { 'HTML': 10, 'PDF': 8, 'OCR (列表)': 7, 'OCR': 6, '語音': 4 };
 
 function processNewRecord(newData, file, source, sheetId, rawText, metaData) {
   try {
@@ -474,7 +539,7 @@ function processNewRecord(newData, file, source, sheetId, rawText, metaData) {
       const fileUrl = file ? file.getUrl() : null;
       writeToSheet(newData, fileUrl, rawText, null, source, sheetId, status, metaData);
       
-      if (file) {
+      if (file && source !== 'OCR (列表)') { // 列表檔案在 processImageAsTransactionList 中統一處理
         const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
         file.moveTo(archiveFolder);
       }
@@ -502,6 +567,11 @@ function findRelatedRecord(newData, sheet, newRawText) {
         return { rowIndex: i + 1, data: values[i] };
       }
     }
+  }
+
+  // 對於列表交易，由於時間可能相同，僅依賴時間和金額的查重過於危險，故跳過
+  if (newRawText && newRawText.includes('transaction_type')) {
+      return null;
   }
 
   const newDate = new Date(newData.timestamp);
@@ -570,7 +640,6 @@ function enrichAndMergeData(newData, oldRowData, newSource) {
 // AI 呼叫函式
 // =================================================================================================
 
-// ============================= V39.3 DATA SANITIZATION FIX START =============================
 function callGeminiForNormalization(messyJsonText) {
   const prompt = `
 你是一位專業、嚴謹的數據正規化 AI。你的唯一任務是將一個格式混亂的 JSON 字串，轉換為一個結構與欄位名稱都完全標準化的 JSON 字串。
@@ -645,18 +714,47 @@ ${messyJsonText}
 
 function callGeminiForVision(imageBlob, voiceNote) {
   const extractionPrompt = `
-你是一位強大的 OCR 資訊提取 AI。你的任務是分析一張收據圖片，並將所有你看到的關鍵資訊提取成一個 JSON 物件。
+你是一位專業的數據分析師，專精於從圖片中提取結構化資訊。你的任務是分析一張包含單筆收據或多筆交易列表的圖片。
 
 ---
-**【指導原則】**
-1.  **盡力提取**: 請提取所有你認為有用的資訊，例如：日期 (Date), 時間 (Time), 店家 (Vendor), 總金額 (Total), 品項 (Items), 付款方式 (Payment Method), 備註 (Remarks), 地址 (address), 電話 (telephone) 等。
-2.  **格式自由**: 你可以使用任何你認為最合理的鍵名 (key) 來組織資訊。
-3.  **巢狀結構**: 如果有品項列表，請使用巢狀結構。
-4.  **完整文字**: 請**務必**提供一個 \`rawText\` 欄位，包含從圖片中辨識出的所有原始文字。
-5.  **輸出結構**: 最終請回傳一個包含所有你提取出的欄位（包括 \`rawText\`）的 JSON 物件。
+**【最高指導原則】**
+1.  **情境判斷**: 首先，請判斷圖片是「單筆收據」還是「交易列表」(例如 IC 卡的消費紀錄)。
+2.  **輸出結構**:
+    * **如果是「單筆收據」**: 請回傳一個包含 \`extractedData\` 和 \`rawText\` 這兩個鍵的 JSON 物件。\`extractedData\` 應包含你提取的所有欄位。
+    * **如果是「交易列表」**: 請回傳一個包含 \`transactions\` (一個物件陣列) 和 \`rawText\` 這兩個鍵的 JSON 物件。
+
+---
+**【交易列表的處理規則】**
+如果判斷為「交易列表」，請遵循以下規則：
+1.  **遍歷列表**: 將列表中的每一筆交易，都轉換為一個獨立的 JSON 物件。
+2.  **交易定性**: 對於每一個物件，除了提取金額、描述外，**必須**增加一個新的欄位 \`transaction_type\`。
+3.  **定性規則**:
+    * 如果交易描述中包含「增值」、「チャージ」、「Top-up」等關鍵字，將 \`transaction_type\` 標記為 \`TRANSFER\`。
+    * 對於所有其他的消費項目（如「巴士」、「JR線」），將 \`transaction_type\` 標記為 \`EXPENSE\`。
+4.  **欄位提取**: 盡力提取每一筆交易的 \`date\`, \`description\`, \`amount\`。
+
+---
+**【範例】**
+* **範例 1 (單筆收據)**
+    [輸出]:
+    {
+      "extractedData": {"Date": "2025-06-20", "Vendor": "迪卡儂", "Total": "1027", ...},
+      "rawText": "2025-06-20 迪卡儂..."
+    }
+
+* **範例 2 (交易列表)**
+    [輸出]:
+    {
+      "transactions": [
+        { "date": "6月30日", "description": "增值 中部國際空港", "amount": "+¥2,000", "transaction_type": "TRANSFER" },
+        { "date": "6月30日", "description": "中部國際空港", "amount": "¥910", "transaction_type": "EXPENSE" }
+      ],
+      "rawText": "6月30日 增值..."
+    }
+
 ---
 **【你的任務】**
-現在，請處理以下新的圖片與語音備註。請將語音備註的內容，作為 \`notes\` 或 \`Remarks\` 欄位的值。
+現在，請處理以下新的圖片與語音備註。請將語音備註的內容，作為單筆收據中的 \`notes\` 或 \`Remarks\` 欄位的值。
 [輸入語音備註]: "${voiceNote || '無'}"
 `;
 
@@ -685,11 +783,15 @@ function callGeminiForVision(imageBlob, voiceNote) {
     
     const fullResponseText = jsonResponse.candidates[0].content.parts[0].text;
     const parsedJson = JSON.parse(fullResponseText);
-    
-    // V39.3 Data Sanitization
+
+    // 如果是交易列表，直接回傳
+    if (parsedJson.transactions && Array.isArray(parsedJson.transactions)) {
+        return parsedJson;
+    }
+
+    // 如果是單筆收據，進行正規化
     const rawText = parsedJson.rawText || '';
     
-    // 建立一個新的物件，只包含我們需要的正規化資料，並將其他所有欄位打包成 metaData
     const metaData = {};
     let messyJsonForNormalization = {};
 
@@ -702,7 +804,6 @@ function callGeminiForVision(imageBlob, voiceNote) {
     
     const messyJsonText = JSON.stringify(messyJsonForNormalization);
 
-    // Pass 2: Normalization - 將不規則的 JSON 正規化
     Logger.log(`提取出的原始 JSON: ${messyJsonText}`);
     const cleanJsonText = callGeminiForNormalization(messyJsonText);
     Logger.log(`正規化後的 JSON: ${cleanJsonText}`);
@@ -714,8 +815,6 @@ function callGeminiForVision(imageBlob, voiceNote) {
     throw new Error(`Failed to process vision API call: ${e.message}`);
   }
 }
-// ============================= V39.3 DATA SANITIZATION FIX END ===============================
-
 
 function callGeminiForPdfText(pdfText, textQuality) {
   const prompt = `

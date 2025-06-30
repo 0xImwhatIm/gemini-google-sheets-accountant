@@ -18,6 +18,7 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
 
 ### 核心功能 / Core Features
 
+* **📊 交易列表處理 (Transaction List Processing):** (V40.0 新功能) 能夠智慧地解析像 IC 卡消費紀錄這樣的螢幕截圖，自動將多筆交易拆分、逐一記錄，並能準確區分「消費」與「儲值」。
 * **🧠 兩段式 AI 引擎 (Two-Pass AI Engine):** 採用革命性的「提取-正規化」架構，第一層 AI 負責最大化提取資訊，第二層 AI 負責將其轉換為標準格式，極大提升了對複雜單據的辨識成功率與穩定性。
 * **✨ 智慧合併引擎 (Smart Reconciliation Engine):** 獨家的 `processNewRecord` 邏輯，能自動合併關聯紀錄、補充缺失資訊，徹底解決重複記帳問題。
 * **⚙️ 動態規則引擎 (Dynamic Rule Engine):** 所有郵件處理規則都在 Google Sheets 中進行設定，無需修改程式碼。
