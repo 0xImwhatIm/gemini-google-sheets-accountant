@@ -1,11 +1,13 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V39.2 - 最終修正與命名統一版 (Final Fix & Naming Convention)
+// 版本：V39.4 - 元數據增強版 (Meta Data Enhancement)
 // 作者：0ximwhatim & Gemini
-// 最後更新：2025-06-29
-// 說明：此版本為一個完整的、可獨立運作的程式碼。
-//      1. 修正 V39.1 的防禦性邏輯，使其更能適應 AI 的多樣化輸出。
-//      2. 採納使用者建議，將圖片上傳參數統一為 snake_case，從 image_base64 更改為 image_base_64，提升 API 一致性。
+// 最後更新：2025-06-30
+// 說明：此版本引入了「元數據 (Meta Data)」儲存機制。
+//      - 在 callGeminiForVision 中，系統除了提取和正規化核心記帳數據外，
+//        還會將 AI 提供的所有附加資訊（如 address, telephone）打包成 JSON 字串。
+//      - writeToSheet 函式新增了對 metaData 的處理，將其寫入新的 META_DATA 欄位，
+//        為未來「一張收據是一段回憶」等功能奠定數據基礎。
 // =================================================================================================
 
 // =================================================================================================
@@ -59,7 +61,6 @@ function doPost_Image(e) {
   try {
     const params = JSON.parse(e.postData.contents);
     const targetSheetId = sanitizeSheetId(params.target_sheet_id || MAIN_LEDGER_ID);
-    // V39.2 修正：將接收的參數名稱更改為 image_base_64 以符合 snake_case 慣例
     const imageBase64 = params.image_base_64;
     const voiceText = params.voice_text;
     const fileName = params.filename || `image_${new Date().getTime()}.jpg`;
@@ -86,7 +87,7 @@ function doPost_Pdf(e) {
   try {
     const params = JSON.parse(e.postData.contents);
     const targetSheetId = sanitizeSheetId(params.target_sheet_id || MAIN_LEDGER_ID);
-    const pdfBase64 = params.image_base_64; // PDF 入口暫時保持 image_base_64 以免影響其他潛在整合
+    const pdfBase64 = params.image_base_64;
     const fileName = params.filename || `file_${new Date().getTime()}.pdf`;
 
     if (!pdfBase64) throw new Error("缺少 pdf (image_base_64) 參數。");
@@ -295,7 +296,7 @@ function processAutomatedEmails() {
             if (htmlContent) {
               const invoiceData = parseInvoiceEmail(htmlContent);
               if (invoiceData) {
-                 processNewRecord(invoiceData, null, `HTML (${sourceDescription})`, sanitizedMainLedgerId, null);
+                 processNewRecord(invoiceData, null, `HTML (${sourceDescription})`, sanitizedMainLedgerId, null, null);
                  message.markRead();
               } else {
                  Logger.log(`郵件 "${message.getSubject()}" 的 HTML 內容無法解析，跳過。`);
@@ -339,7 +340,7 @@ function processImage(file, optionalVoiceNote, sheetId) {
     const aiResult = callGeminiForVision(file.getBlob(), optionalVoiceNote);
     const parsedData = JSON.parse(aiResult.text);
     const source = optionalVoiceNote ? 'OCR+語音' : 'OCR';
-    processNewRecord(parsedData, file, source, sheetId, aiResult.rawText);
+    processNewRecord(parsedData, file, source, sheetId, aiResult.rawText, aiResult.metaData);
   } catch (error) {
     Logger.log(`[processImage Error] ${error.toString()} for file ${file.getName()}`);
     handleFailedFile(error, file, sheetId);
@@ -383,7 +384,7 @@ function processPdf(file, sheetId) {
     const parsedData = JSON.parse(aiResult);
     
     const source = `PDF (${usedEngine})`;
-    processNewRecord(parsedData, file, source, sheetId, pdfText);
+    processNewRecord(parsedData, file, source, sheetId, pdfText, null);
   
   } catch (finalProcessingError) {
     Logger.log(`[最終處理階段 Error] 在分析文字或寫入表格時發生錯誤。檔案: ${file.getName()}, 錯誤: ${finalProcessingError.toString()}`);
@@ -395,7 +396,7 @@ function processVoice(voiceText, sheetId) {
   try {
     const aiResultText = callGeminiForVoice(voiceText);
     const parsedData = JSON.parse(aiResultText);
-    const result = processNewRecord(parsedData, null, '語音', sheetId, voiceText);
+    const result = processNewRecord(parsedData, null, '語音', sheetId, voiceText, null);
     return ContentService.createTextOutput(JSON.stringify({ status: result ? 'success' : 'error', data: parsedData })).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     Logger.log(`[processVoice Error] ${error.toString()} for text "${voiceText}"`);
@@ -450,7 +451,7 @@ function handleFailedFile(error, file, sheetId) {
 // =================================================================================================
 const SOURCE_TRUST_SCORES = { 'HTML': 10, 'PDF': 8, 'OCR': 6, '語音': 4 };
 
-function processNewRecord(newData, file, source, sheetId, rawText) {
+function processNewRecord(newData, file, source, sheetId, rawText, metaData) {
   try {
     const sheet = SpreadsheetApp.openById(sheetId).getSheetByName(SHEET_NAME);
     const relatedRecord = findRelatedRecord(newData, sheet, rawText);
@@ -471,7 +472,7 @@ function processNewRecord(newData, file, source, sheetId, rawText) {
       Logger.log(`未找到關聯紀錄，將新增一筆紀錄。`);
       const status = (newData.confidence === 'low') ? '需人工確認' : '待確認';
       const fileUrl = file ? file.getUrl() : null;
-      writeToSheet(newData, fileUrl, rawText, null, source, sheetId, status);
+      writeToSheet(newData, fileUrl, rawText, null, source, sheetId, status, metaData);
       
       if (file) {
         const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
@@ -569,6 +570,7 @@ function enrichAndMergeData(newData, oldRowData, newSource) {
 // AI 呼叫函式
 // =================================================================================================
 
+// ============================= V39.3 DATA SANITIZATION FIX START =============================
 function callGeminiForNormalization(messyJsonText) {
   const prompt = `
 你是一位專業、嚴謹的數據正規化 AI。你的唯一任務是將一個格式混亂的 JSON 字串，轉換為一個結構與欄位名稱都完全標準化的 JSON 字串。
@@ -647,11 +649,11 @@ function callGeminiForVision(imageBlob, voiceNote) {
 
 ---
 **【指導原則】**
-1.  **盡力提取**: 請提取所有你認為有用的資訊，例如：日期 (Date), 時間 (Time), 店家 (Vendor), 總金額 (Total), 品項 (Items), 付款方式 (Payment Method), 備註 (Remarks) 等。
+1.  **盡力提取**: 請提取所有你認為有用的資訊，例如：日期 (Date), 時間 (Time), 店家 (Vendor), 總金額 (Total), 品項 (Items), 付款方式 (Payment Method), 備註 (Remarks), 地址 (address), 電話 (telephone) 等。
 2.  **格式自由**: 你可以使用任何你認為最合理的鍵名 (key) 來組織資訊。
 3.  **巢狀結構**: 如果有品項列表，請使用巢狀結構。
-4.  **完整文字**: 除了結構化數據，請另外提供一個 \`rawText\` 欄位，包含從圖片中辨識出的所有原始文字。
-5.  **輸出結構**: 最終請回傳一個包含 \`extractedData\` (你提取的 JSON) 和 \`rawText\` 這兩個鍵的 JSON 物件。
+4.  **完整文字**: 請**務必**提供一個 \`rawText\` 欄位，包含從圖片中辨識出的所有原始文字。
+5.  **輸出結構**: 最終請回傳一個包含所有你提取出的欄位（包括 \`rawText\`）的 JSON 物件。
 ---
 **【你的任務】**
 現在，請處理以下新的圖片與語音備註。請將語音備註的內容，作為 \`notes\` 或 \`Remarks\` 欄位的值。
@@ -683,37 +685,37 @@ function callGeminiForVision(imageBlob, voiceNote) {
     
     const fullResponseText = jsonResponse.candidates[0].content.parts[0].text;
     const parsedJson = JSON.parse(fullResponseText);
+    
+    // V39.3 Data Sanitization
+    const rawText = parsedJson.rawText || '';
+    
+    // 建立一個新的物件，只包含我們需要的正規化資料，並將其他所有欄位打包成 metaData
+    const metaData = {};
+    let messyJsonForNormalization = {};
 
-    // V39.1 修正：更強健的防禦性檢查
-    let messyJsonText = null;
-    let rawText = '';
-
-    if (parsedJson.extractedData) {
-        // 理想情況：AI 遵循了巢狀結構
-        messyJsonText = JSON.stringify(parsedJson.extractedData);
-        rawText = parsedJson.rawText || '';
-    } else if (parsedJson.Date || parsedJson.Vendor || parsedJson.Total || parsedJson.date || parsedJson.vendor || parsedJson.total) {
-        // 次要情況：AI 回傳了扁平的資料，但看起來是我們要的內容
-        Logger.log("警告：AI 未遵循巢狀結構，系統將嘗試自動修正格式。");
-        messyJsonText = JSON.stringify(parsedJson); // 直接使用這個扁平的 JSON
-        rawText = parsedJson.rawText || '';
-    } else {
-        // AI 回應的 JSON 結構完全不符合預期
-        throw new Error("AI 回應的 JSON 結構不符合預期 (缺少 extractedData 或可識別的扁平化資料鍵)。");
+    for (const key in parsedJson) {
+      if (key !== 'rawText') {
+        messyJsonForNormalization[key] = parsedJson[key];
+        metaData[key] = parsedJson[key];
+      }
     }
+    
+    const messyJsonText = JSON.stringify(messyJsonForNormalization);
 
     // Pass 2: Normalization - 將不規則的 JSON 正規化
     Logger.log(`提取出的原始 JSON: ${messyJsonText}`);
     const cleanJsonText = callGeminiForNormalization(messyJsonText);
     Logger.log(`正規化後的 JSON: ${cleanJsonText}`);
     
-    return { text: cleanJsonText, rawText: rawText };
+    return { text: cleanJsonText, rawText: rawText, metaData: metaData };
 
   } catch (e) {
     Logger.log(`callGeminiForVision 處理失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
     throw new Error(`Failed to process vision API call: ${e.message}`);
   }
 }
+// ============================= V39.3 DATA SANITIZATION FIX END ===============================
+
 
 function callGeminiForPdfText(pdfText, textQuality) {
   const prompt = `
@@ -850,7 +852,7 @@ function callDocumentAIAPI(blob) {
 // =================================================================================================
 // 表格寫入函式
 // =================================================================================================
-function writeToSheet(data, fileUrl, rawText, translation, source, sheetId, customStatus = '待確認') {
+function writeToSheet(data, fileUrl, rawText, translation, source, sheetId, customStatus = '待確認', metaData = null) {
   let sheet;
   try {
     const cleanSheetId = sanitizeSheetId(sheetId);
@@ -868,7 +870,7 @@ function writeToSheet(data, fileUrl, rawText, translation, source, sheetId, cust
     data.amount || null, data.currency || 'TWD', rate, amountTWD || null,
     data.category || '其他', data.item || null, '私人', data.invoiceNumber || null,
     data.referenceNumber || null, null, null, null, fileUrl, customStatus, source,
-    data.notes || null, rawText, translation
+    data.notes || null, rawText, translation, metaData ? JSON.stringify(metaData) : null
   ];
   sheet.appendRow(row);
   return true;
@@ -892,14 +894,14 @@ function writeToSheetFromEmail(data, sheetId, source = '電子發票') {
   const row = [
     data.timestamp, data.amount, data.currency, 1, data.amount,
     '其他', data.item, '私人', data.invoiceNumber, null, null, null, null, null,
-    '待確認', source, `由 ${data.item} 開立`, null, null
+    '待確認', source, `由 ${data.item} 開立`, null, null, null
   ];
   sheet.appendRow(row);
   return true;
 }
 
 function writeToSheetFromVoice(data, sheetId, originalVoiceText) {
-  processNewRecord(data, null, '語音', sheetId, originalVoiceText);
+  processNewRecord(data, null, '語音', sheetId, originalVoiceText, null);
   return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: data })).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -1022,4 +1024,3 @@ function parseInvoiceEmail(htmlBody) {
     currency: 'TWD'
   };
 }
-
