@@ -1,25 +1,27 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V40.4 - 帳單知識庫擴充版 (Billing Knowledge Expansion)
+// 版本：V41.1 - 最終優化版 (Final Optimization)
 // 作者：0ximwhatim & Gemini
-// 最後更新：2025-07-05
-// 說明：此版本針對 PDF 繳費單辨識失敗的問題進行修正。
-//      - 大幅強化 callGeminiForPdfText 的 Prompt，新增了處理「繳費證明單」的規則與範例。
-//      - AI 現在能夠理解「學校名稱」、「繳款金額」等欄位，並將其正確歸類，提升了對非零售收據的處理能力。
+// 最後更新：2025-07-08
+// 說明：此版本為最終優化。
+//      - [修正] 修正了處理 HTML 郵件時，AI 會將 metaData 寫入 notes 欄位的問題。
+//      - [強化] 再次強化 callGeminiForNormalization 的 Prompt，對 notes 欄位做出更嚴格的規定。
+//      - [優化] 統一了所有處理流程中，傳遞給 processNewRecord 的 metaData 格式。
 // =================================================================================================
 
 // =================================================================================================
 // 【使用者設定區】
 // =================================================================================================
-const MAIN_LEDGER_ID = 'YOUR_MAIN_SPREADSHEET_ID_HERE';
+const MAIN_LEDGER_ID = 'YOUR_GOOGLE_SHEET_ID_HERE'; // 主帳本的 Google Sheet ID
 const SHEET_NAME = 'All Records';
+const EMAIL_RULES_SHEET_NAME = 'EmailRules';
 const SETTINGS_SHEET_NAME = 'Settings';
 const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY_HERE';
-const GCP_PROJECT_ID = 'YOUR_GCP_PROJECT_ID_HERE';
-const DOCUMENT_AI_PROCESSOR_ID = 'YOUR_DOC_AI_PROCESSOR_ID_HERE';
-const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_PROCESSING';
-const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVING';
-const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES';
+const GCP_PROJECT_ID = 'YOUR_GCP_PROJECT_ID_HERE'; // 例如 'my-gcp-project-12345'
+const DOCUMENT_AI_PROCESSOR_ID = 'YOUR_DOCUMENT_AI_PROCESSOR_ID_HERE'; // 例如 'a1b2c3d4e5f6g7h8'
+const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_TO_PROCESS';
+const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVE';
+const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES'; // 也可用於歸檔錯誤檔案
 
 // =================================================================================================
 // 【V35.0 核心】多入口路由
@@ -206,9 +208,9 @@ function sendNotification(title, message, severity) {
 // =================================================================================================
 function getEmailProcessingRulesFromSheet() {
   try {
-    const sheet = SpreadsheetApp.openById(MAIN_LEDGER_ID).getSheetByName(SETTINGS_SHEET_NAME);
+    const sheet = SpreadsheetApp.openById(MAIN_LEDGER_ID).getSheetByName(EMAIL_RULES_SHEET_NAME);
     if (!sheet) {
-      throw new Error(`找不到名為 "${SETTINGS_SHEET_NAME}" 的工作表。`);
+      throw new Error(`找不到名為 "${EMAIL_RULES_SHEET_NAME}" 的工作表。`);
     }
     const range = sheet.getRange("A2:B" + sheet.getLastRow());
     const values = range.getValues();
@@ -222,12 +224,12 @@ function getEmailProcessingRulesFromSheet() {
       return null;
     }).filter(rule => rule !== null);
 
-    Logger.log(`成功從 "${SETTINGS_SHEET_NAME}" 工作表讀取了 ${rules.length} 條規則。`);
+    Logger.log(`成功從 "${EMAIL_RULES_SHEET_NAME}" 工作表讀取了 ${rules.length} 條規則。`);
     return rules;
 
   } catch (error) {
     Logger.log(`[getEmailProcessingRulesFromSheet Error] 讀取規則時發生錯誤: ${error.toString()}`);
-    sendNotification('讀取郵件規則失敗', `無法從 "${SETTINGS_SHEET_NAME}" 工作表讀取郵件處理規則。\n\n錯誤詳情:\n${error.stack}`, 'ERROR');
+    sendNotification('讀取郵件規則失敗', `無法從 "${EMAIL_RULES_SHEET_NAME}" 工作表讀取郵件處理規則。\n\n錯誤詳情:\n${error.stack}`, 'ERROR');
     return [];
   }
 }
@@ -237,78 +239,93 @@ function getEmailProcessingRulesFromSheet() {
 // =================================================================================================
 
 function processAutomatedEmails() {
-  const processFolder = DriveApp.getFolderById(FOLDER_ID_TO_PROCESS);
   const sanitizedMainLedgerId = sanitizeSheetId(MAIN_LEDGER_ID);
-  
   const emailProcessingRules = getEmailProcessingRulesFromSheet();
 
   if (emailProcessingRules.length === 0) {
-    Logger.log("警告：未從 'Settings' 工作表讀取到任何有效的郵件處理規則，本次執行結束。");
+    Logger.log("警告：未從 'EmailRules' 工作表讀取到任何有效的郵件處理規則，本次執行結束。");
     return;
   }
  
   emailProcessingRules.forEach(rule => {
-    const fullQuery = `${rule.query} is:unread`;
+    const fullQuery = `${rule.query}`;
     Logger.log(`正在搜尋郵件: "${fullQuery}"，處理類型: ${rule.type}`);
     
     const threads = GmailApp.search(fullQuery);
+    Logger.log(`搜尋結果: 找到了 ${threads.length} 個符合條件的郵件線程。`);
+
     threads.forEach(thread => {
-      const messages = thread.getMessages();
-      messages.forEach(message => {
-        try {
-          if (rule.type.toUpperCase() === 'PDF') {
-            const attachments = message.getAttachments();
-            if (attachments.length > 0) {
-              let pdfFound = false;
-              attachments.forEach(attachment => {
-                if (attachment.getContentType() === 'application/pdf') {
-                  processFolder.createFile(attachment);
-                  pdfFound = true;
+      const message = thread.getMessages()[0];
+      try {
+        const ruleType = rule.type.toUpperCase();
+
+        if (ruleType === 'CSV') {
+          const attachments = message.getAttachments();
+          const csvAttachment = attachments.find(att => att.getName().toLowerCase().endsWith('.csv'));
+          
+          if (csvAttachment) {
+            const csvContent = csvAttachment.getDataAsString('utf-8');
+            const lines = csvContent.split(/\r\n|\n/);
+            let successCount = 0;
+
+            lines.forEach(line => {
+              if (line.trim().startsWith('M|')) {
+                try {
+                  const normalizedDataString = callGeminiForNormalization(line, message.getDate());
+                  if (normalizedDataString) {
+                    const record = JSON.parse(normalizedDataString);
+                    if (record && record.amount && parseFloat(record.amount) > 0) {
+                      processNewRecord(record, null, `Email CSV: ${csvAttachment.getName()}`, sanitizedMainLedgerId, line, null);
+                      successCount++;
+                    }
+                  }
+                } catch (lineError) {
+                   Logger.log(`處理 CSV 行失敗: "${line}". 錯誤: ${lineError.toString()}`);
                 }
-              });
-              if (pdfFound) {
-                  Logger.log(`找到 PDF 附件於郵件: ${message.getSubject()}`);
-                  message.markRead();
               }
-            }
+            });
+            Logger.log(`CSV 附件 "${csvAttachment.getName()}" 中，成功處理了 ${successCount} 筆紀錄。`);
+            thread.markRead();
+          } else {
+            Logger.log(`規則為 CSV，但在郵件 "${message.getSubject()}" 中未找到 .csv 附件。`);
+            thread.markRead();
           }
-          else if (rule.type.toUpperCase() === 'HTML') {
-            let htmlContent = null;
-            let sourceDescription = "電子發票";
-            const attachments = message.getAttachments();
-            
-            const htmlAttachment = attachments.find(att =>
-                att.getContentType() === MimeType.HTML ||
-                att.getName().toLowerCase().endsWith('.htm') ||
-                att.getName().toLowerCase().endsWith('.html')
-            );
-            
-            if (htmlAttachment) {
-              htmlContent = htmlAttachment.getDataAsString();
-              sourceDescription = `電子發票 (${htmlAttachment.getName()})`;
-              Logger.log(`找到 ${sourceDescription} 於郵件: ${message.getSubject()}`);
-            } else {
-              htmlContent = message.getBody();
-            }
-            
-            if (htmlContent) {
-              const invoiceData = parseInvoiceEmail(htmlContent);
-              if (invoiceData) {
-                 processNewRecord(invoiceData, null, `HTML (${sourceDescription})`, sanitizedMainLedgerId, null, null);
-                 message.markRead();
-              } else {
-                 Logger.log(`郵件 "${message.getSubject()}" 的 HTML 內容無法解析，跳過。`);
-              }
-            }
-          }
-        } catch (e) {
-          Logger.log(`處理郵件失敗: ${e.toString()}. 主旨: ${message.getSubject()}`);
-          sendNotification('郵件處理失敗', `處理郵件 "${message.getSubject()}" 時發生錯誤。\n\n錯誤詳情:\n${e.stack}`, 'ERROR');
         }
-      });
+        else { // 處理 HTML, PDF 等其他類型
+          let content = '';
+          let source = '';
+          if (ruleType === 'HTML') {
+            content = message.getBody();
+            source = `Email Body: ${message.getSubject()}`;
+          } else if (ruleType === 'PDF') {
+            const attachments = message.getAttachments({ mimeType: 'application/pdf' });
+            if (attachments.length > 0) {
+                const pdfBlob = attachments[0];
+                const processFolder = DriveApp.getFolderById(FOLDER_ID_TO_PROCESS);
+                processFolder.createFile(pdfBlob);
+                Logger.log(`找到 PDF 附件於郵件: ${message.getSubject()}，已存入待處理資料夾。`);
+                thread.markRead();
+            }
+            return;
+          }
+          
+          if (content) {
+            const normalizedDataString = callGeminiForNormalization(content, message.getDate());
+            if (normalizedDataString) {
+              const record = JSON.parse(normalizedDataString);
+              processNewRecord(record, null, source, sanitizedMainLedgerId, content, null);
+              thread.markRead();
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log(`處理郵件線程失敗: ${e.toString()}. 主旨: ${message.getSubject()}`);
+        sendNotification('郵件處理失敗', `處理郵件 "${message.getSubject()}" 時發生錯誤。\n\n錯誤詳情:\n${e.stack}`, 'ERROR');
+      }
     });
   });
 }
+
 
 function checkReceiptsFolder() {
   const processFolder = DriveApp.getFolderById(FOLDER_ID_TO_PROCESS);
@@ -504,7 +521,7 @@ function handleFailedFile(error, file, sheetId) {
 // =================================================================================================
 // 【V38.0 新增】資料關聯與擴充 (Data Reconciliation & Enrichment)
 // =================================================================================================
-const SOURCE_TRUST_SCORES = { 'HTML': 10, 'PDF': 8, 'OCR (列表)': 7, 'OCR': 6, '語音': 4 };
+const SOURCE_TRUST_SCORES = { 'HTML': 10, 'PDF': 8, 'OCR (列表)': 7, 'OCR': 6, '語音': 4, 'CSV': 9 };
 
 function processNewRecord(newData, file, source, sheetId, rawText, metaData) {
   try {
@@ -529,7 +546,7 @@ function processNewRecord(newData, file, source, sheetId, rawText, metaData) {
       const fileUrl = file ? file.getUrl() : null;
       writeToSheet(newData, fileUrl, rawText, null, source, sheetId, status, metaData);
       
-      if (file && source !== 'OCR (列表)') { // 列表檔案在 processImageAsTransactionList 中統一處理
+      if (file && source !== 'OCR (列表)') {
         const archiveFolder = DriveApp.getFolderById(FOLDER_ID_ARCHIVE);
         file.moveTo(archiveFolder);
       }
@@ -629,55 +646,56 @@ function enrichAndMergeData(newData, oldRowData, newSource) {
 // AI 呼叫函式
 // =================================================================================================
 
-function callGeminiForNormalization(messyJsonText) {
+function callGeminiForNormalization(inputText, messageDate) {
   const prompt = `
-你是一位專業、嚴謹的數據正規化 AI。你的唯一任務是將一個格式混亂的 JSON 字串，轉換為一個結構與欄位名稱都完全標準化的 JSON 字串。
+你是一位專業、嚴謹的數據正規化 AI。你的唯一任務是將一段非結構化的文字，轉換為一個結構與欄位名稱都完全標準化的 JSON 物件。
 
 ---
-**【最高指導原則】**
-1.  **輸出格式**: 你的輸出**必須**是一個單一、合法的 JSON 物件。
-2.  **標準欄位名稱**: 你**必須**使用以下指定的、小寫的、蛇形命名的欄位名稱。**嚴禁**使用任何其他自創的欄位名稱。
-    * **標準欄位**: \`timestamp\`, \`amount\`, \`currency\`, \`category\`, \`item\`, \`invoiceNumber\`, \`referenceNumber\`, \`notes\`。
-3.  **欄位對應**: 請根據以下對應規則，將輸入 JSON 的鍵名映射到標準欄位：
-    * \`Date\`, \`TransactionDate\`, \`date\` -> \`timestamp\`
-    * \`Vendor\`, \`Store\`, \`Merchant\` -> \`item\`
-    * \`Total\`, \`TotalAmount\`, \`Price\` -> \`amount\`
-    * \`Remarks\`, \`Memo\` -> \`notes\`
-    * 其他相似的鍵名也請比照辦理。
-4.  **分類 (category)**:
-    * **嚴格規則**: **必須**從以下固定清單中選擇一個最相近的：['食', '衣', '住', '行', '育', '樂', '醫療保險', '內部轉帳', '其他']。
-    * **你的任務是分類，不是創造分類。** 請根據輸入 JSON 中的 \`item\` 或 \`Vendor\` 資訊來判斷。如果無法判斷，請**務必**將其歸類為「其他」。
-5.  **時間戳 (timestamp)**:
-    * **強制合併**: 如果輸入中**同時包含** \`Date\` 和 \`Time\` 兩個欄位，你**必須**將它們合併成最終的 \`timestamp\`。
-    * **預設時間**: 只有在 \`Time\` 欄位完全不存在時，才可以使用 \`00:00:00\` 作為時間。
-    * **格式**: 最終格式必須是 **\`YYYY-MM-DDTHH:mm:ss\`** 的 ISO 8601 標準格式。
-6.  **幣別 (currency)**:
-    * **優先級**: 請優先從輸入 JSON 的 \`notes\` 欄位（語音備註）中尋找幣別關鍵字（如「日幣」）。
-    * **次要級**: 如果 \`notes\` 中沒有，再從 \`amount\` 或 \`Total\` 等金額欄位的字串中尋找貨幣符號（如 \`¥\`, \`$\`）。
-    * **預設值**: 如果都找不到，則預設為 \`TWD\`。
-7.  **找不到的欄位**: 如果輸入 JSON 中找不到對應的資訊，請在輸出中將該標準欄位設為 null。
+**【情境判斷與規則】**
+
+1.  **如果輸入是「CSV 的單行」 (特徵：以 "M|" 開頭，用 "|" 分隔):**
+    * **輸出格式**: 你的輸出**必須**是一個**單一的、合法的 JSON 物件**。
+    * **數據提取**: 這是一筆發票主紀錄。請從中提取資訊。
+        * 第 3 個欄位是載具號碼 -> \`referenceNumber\`
+        * 第 4 個欄位是發票日期 -> \`timestamp\` (格式：YYYY-MM-DD)
+        * 第 6 個欄位是商店店名 -> \`item\`
+        * 第 7 個欄位是發票號碼 -> \`invoiceNumber\`
+        * 第 8 個欄位是總金額 -> \`amount\`
+    * **忽略非消費項目**: 如果「商店店名」中包含「自動加值」，請回傳一個空的 JSON 物件 \`{}\`。
+
+2.  **如果輸入是「其他格式」 (例如 HTML 或一般 JSON):**
+    * **輸出格式**: 你的輸出**必須**是一個**單一的、合法的 JSON 物件**。
+    * **欄位對應**: 將輸入中的 \`Date\`, \`Vendor\`, \`Total\` 等鍵名，映射到標準欄位。
+    * **備註欄位 (notes)**: **僅**將看起來像是人類備註的文字放入 \`notes\` 欄位。如果找不到，此欄位**必須**為 \`null\`。**嚴禁**將其他欄位的資料或整個物件複製到 \`notes\` 欄位中。
 
 ---
-**【學習範例】**
-[輸入的混亂 JSON 字串]:
-'{"Date": "2025/07/02", "Time": "13:22", "Vendor": "FLYING OVEN", "Total": "¥3,550", "notes": "午餐在魔女之谷..."}'
+**【通用規則 (對所有格式都適用)】**
+
+1.  **標準欄位**: \`timestamp\`, \`amount\`, \`currency\`, \`category\`, \`item\`, \`invoiceNumber\`, \`referenceNumber\`, \`notes\`。
+2.  **分類 (category)**: **必須**從 ['食', '衣', '住', '行', '育', '樂', '醫療保險', '內部轉帳', '其他'] 中選擇。如果無法判斷，請**務必**歸類為「其他」。
+3.  **時間戳 (timestamp)**: 最終格式必須是 **\`YYYY-MM-DDTHH:mm:ss\`**。如果只有日期，時間請用 \`00:00:00\`。
+4.  **找不到的欄位**: 如果輸入中找不到對應的資訊，請在輸出中將該標準欄位設為 null。
+
+---
+**【學習範例：CSV 單行輸入】**
+[輸入文字]: "M|手機條碼|/PZWC6KQ|20250501|80354145|全聯實業|NA53837567|533|開立|"
 
 [你的標準化輸出 JSON 字串]:
 {
-  "timestamp": "2025-07-02T13:22:00",
-  "amount": 3550,
-  "currency": "JPY",
+  "timestamp": "2025-05-01T00:00:00",
+  "amount": 533,
+  "currency": "TWD",
   "category": "食",
-  "item": "FLYING OVEN",
-  "invoiceNumber": null,
-  "referenceNumber": null,
-  "notes": "午餐在魔女之谷..."
+  "item": "全聯實業",
+  "invoiceNumber": "NA53837567",
+  "referenceNumber": "/PZWC6KQ",
+  "notes": "來自 CSV 附件"
 }
 ---
 **【你的任務】**
-現在，請將以下這個混亂的 JSON 字串，轉換為標準化的 JSON 物件。
-[輸入的混亂 JSON 字串]:
-${messyJsonText}
+現在，請將以下這個文字，轉換為標準化的 JSON 物件。
+[輸入文字]:
+${inputText}
 `;
 
   const requestBody = {
@@ -700,7 +718,6 @@ ${messyJsonText}
     if (jsonResponse.error) { throw new Error(`[Normalization] Gemini API returned an error: ${jsonResponse.error.message}`); }
     if (!jsonResponse.candidates || !jsonResponse.candidates[0].content.parts[0].text) { throw new Error(`[Normalization] Unexpected Gemini API response structure.`); }
     const normalizedJsonText = jsonResponse.candidates[0].content.parts[0].text;
-    JSON.parse(normalizedJsonText);
     return normalizedJsonText;
   } catch (e) {
     Logger.log(`callGeminiForNormalization 解析 JSON 失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
@@ -782,7 +799,7 @@ function callGeminiForVision(imageBlob, voiceNote) {
     const messyJsonText = JSON.stringify(metaData);
 
     Logger.log(`提取出的原始 JSON: ${messyJsonText}`);
-    const cleanJsonText = callGeminiForNormalization(messyJsonText);
+    const cleanJsonText = callGeminiForNormalization(messyJsonText, new Date()); // 傳入當前時間作為備用
     Logger.log(`正規化後的 JSON: ${cleanJsonText}`);
     
     return { text: cleanJsonText, rawText: rawText, metaData: metaData };
@@ -998,6 +1015,42 @@ function writeToSheetFromVoice(data, sheetId, originalVoiceText) {
 // =================================================================================================
 // 輔助函式
 // =================================================================================================
+// --- V40.9 新增 START ---
+/**
+ * 解析一個可能包含多個 JSON 物件的字串。
+ * @param {string} jsonString - AI 回傳的、可能不標準的 JSON 字串。
+ * @returns {Array} - 一個包含所有已解析的 JSON 物件的陣列。
+ */
+function parseMultiJsonString(jsonString) {
+  if (!jsonString || typeof jsonString !== 'string') {
+    return [];
+  }
+
+  // 移除頭尾可能存在的非 JSON 字元 (例如 markdown 的 ```json)
+  const cleanedString = jsonString.trim().replace(/^```json\s*/, '').replace(/```\s*$/, '');
+  
+  // 檢查字串是否已經是合法的 JSON 陣列
+  if (cleanedString.startsWith('[') && cleanedString.endsWith(']')) {
+    try {
+      return JSON.parse(cleanedString);
+    } catch (e) {
+      // 如果解析失敗，繼續下面的流程
+      Logger.log("字串看起來像陣列，但解析失敗，嘗試使用備用方法。");
+    }
+  }
+
+  // 備用方法：將字串用 "},{" 分割，並補全括號
+  try {
+    // 加上外層的 [] 使其成為一個合法的 JSON 陣列字串
+    const arrayString = `[${cleanedString}]`;
+    return JSON.parse(arrayString);
+  } catch (e) {
+    Logger.log(`[parseMultiJsonString Error] 無法將字串解析為 JSON 陣列: ${e.toString()}`);
+    return []; // 如果最終還是失敗，回傳空陣列
+  }
+}
+// --- V40.9 新增 END ---
+
 function isDuplicate(data, rawText, sheetId) {
   const cleanSheetId = sanitizeSheetId(sheetId);
   const sheet = SpreadsheetApp.openById(cleanSheetId).getSheetByName(SHEET_NAME);
