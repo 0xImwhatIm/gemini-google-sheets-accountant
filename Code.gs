@@ -1,12 +1,12 @@
 // =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V41.1 - 最終優化版 (Final Optimization)
+// 版本：V43.0 - 進階解析版 (Advanced Parsing Edition)
 // 作者：0ximwhatim & Gemini
 // 最後更新：2025-07-08
-// 說明：此版本為最終優化。
-//      - [修正] 修正了處理 HTML 郵件時，AI 會將 metaData 寫入 notes 欄位的問題。
-//      - [強化] 再次強化 callGeminiForNormalization 的 Prompt，對 notes 欄位做出更嚴格的規定。
-//      - [優化] 統一了所有處理流程中，傳遞給 processNewRecord 的 metaData 格式。
+// 說明：此版本為重大功能更新，解決了執行超時與特定 HTML 解析的問題。
+//      - [新增] processPdf 現在能偵測加密的 PDF 檔案，並將其移至錯誤資料夾，避免執行超時。
+//      - [強化] callGeminiForNormalization 的 Prompt 新增了處理中華電信表格佈局 HTML 的規則與範例。
+//      - [修正] processAutomatedEmails 現在能正確處理 .htm 格式的附件。
 // =================================================================================================
 
 // =================================================================================================
@@ -22,6 +22,7 @@ const DOCUMENT_AI_PROCESSOR_ID = 'YOUR_DOCUMENT_AI_PROCESSOR_ID_HERE'; // 例如
 const FOLDER_ID_TO_PROCESS = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_TO_PROCESS';
 const FOLDER_ID_ARCHIVE = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_ARCHIVE';
 const FOLDER_ID_DUPLICATES = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_FOR_DUPLICATES'; // 也可用於歸檔錯誤檔案
+const BATCH_SIZE = 5; // 每次執行處理的檔案數量
 
 // =================================================================================================
 // 【V35.0 核心】多入口路由
@@ -291,12 +292,26 @@ function processAutomatedEmails() {
             thread.markRead();
           }
         }
-        else { // 處理 HTML, PDF 等其他類型
+        else {
           let content = '';
           let source = '';
           if (ruleType === 'HTML') {
-            content = message.getBody();
-            source = `Email Body: ${message.getSubject()}`;
+            // V43.0 修正：優先讀取 HTML 附件
+            const htmlAttachment = message.getAttachments().find(att => att.getName().toLowerCase().endsWith('.htm') || att.getName().toLowerCase().endsWith('.html'));
+            if (htmlAttachment) {
+                // 嘗試使用 big5 解碼，因為這是台灣舊式 HTML 的常見編碼
+                try {
+                    content = htmlAttachment.getDataAsString('big5');
+                    source = `Email HTML Attachment (big5): ${htmlAttachment.getName()}`;
+                } catch (e) {
+                    Logger.log(`使用 big5 解碼失敗，嘗試使用預設編碼。錯誤: ${e}`);
+                    content = htmlAttachment.getDataAsString();
+                    source = `Email HTML Attachment (default): ${htmlAttachment.getName()}`;
+                }
+            } else {
+                content = message.getBody();
+                source = `Email Body: ${message.getSubject()}`;
+            }
           } else if (ruleType === 'PDF') {
             const attachments = message.getAttachments({ mimeType: 'application/pdf' });
             if (attachments.length > 0) {
@@ -331,20 +346,31 @@ function checkReceiptsFolder() {
   const processFolder = DriveApp.getFolderById(FOLDER_ID_TO_PROCESS);
   const files = processFolder.getFiles();
   const sanitizedMainLedgerId = sanitizeSheetId(MAIN_LEDGER_ID);
-  while (files.hasNext()) {
+  let processedCount = 0;
+
+  Logger.log(`開始檢查待處理資料夾，本次最多處理 ${BATCH_SIZE} 個檔案。`);
+
+  while (files.hasNext() && processedCount < BATCH_SIZE) {
     const file = files.next();
     const mimeType = file.getMimeType();
     try {
+      Logger.log(`正在處理檔案: ${file.getName()} (類型: ${mimeType})`);
       if (mimeType === MimeType.JPEG || mimeType === MimeType.PNG) {
         processImage(file, null, sanitizedMainLedgerId);
       } else if (mimeType === MimeType.PDF) {
         processPdf(file, sanitizedMainLedgerId);
+      } else {
+        Logger.log(`檔案 ${file.getName()} 的類型不受支援，將其移至錯誤資料夾。`);
+        handleFailedFile(new Error(`不支援的檔案類型: ${mimeType}`), file, sanitizedMainLedgerId);
       }
+      processedCount++;
     } catch (e) {
        Logger.log(`處理檔案 ${file.getName()} 時發生無法預期的錯誤: ${e.toString()}`);
        handleFailedFile(e, file, sanitizedMainLedgerId);
+       processedCount++;
     }
   }
+  Logger.log(`本次執行結束，共處理了 ${processedCount} 個檔案。`);
 }
 
 // =================================================================================================
@@ -419,23 +445,39 @@ function processImageAsTransactionList(transactions, file, optionalVoiceNote, sh
   }
 }
 
+// --- V43.0 改造 START ---
 function processPdf(file, sheetId) {
   let pdfText;
   let usedEngine = "備用引擎";
 
   try {
+    const pdfBlob = file.getBlob();
+    const rawContent = pdfBlob.getDataAsString();
+
+    // 檢查是否為加密 PDF
+    if (rawContent.includes("/Encrypt")) {
+        throw new Error("偵測到加密的 PDF 檔案，無法處理。");
+    }
+
     if (GCP_PROJECT_ID && DOCUMENT_AI_PROCESSOR_ID) {
       Logger.log(`偵測到 Document AI 設定，嘗試使用主引擎處理檔案：${file.getName()}`);
-      pdfText = callDocumentAIAPI(file.getBlob());
+      pdfText = callDocumentAIAPI(pdfBlob);
       usedEngine = "主引擎 (Document AI)";
     } else {
       throw new Error("Document AI 未設定，將使用備用引擎。");
     }
-  } catch (docAiError) {
-    Logger.log(`[${usedEngine} Error] ${docAiError.message}`);
+  } catch (initialError) {
+    // 捕捉加密錯誤或 Document AI 錯誤
+    if (initialError.message.includes("偵測到加密的 PDF")) {
+        Logger.log(`[processPdf Error] ${initialError.message}`);
+        handleFailedFile(initialError, file, sheetId);
+        return;
+    }
+    
+    Logger.log(`[主引擎或前置檢查 Error] ${initialError.message}`);
     Logger.log(`自動切換至備用引擎來處理檔案：${file.getName()}`);
     try {
-      pdfText = extractPdfText(file);
+      pdfText = extractPdfText(file); // extractPdfText 內部已有 %PDF 檢查
       usedEngine = "備用引擎";
     } catch (fallbackError) {
       Logger.log(`[備用引擎 Error] ${fallbackError.message}`);
@@ -463,6 +505,7 @@ function processPdf(file, sheetId) {
     handleFailedFile(finalProcessingError, file, sheetId);
   }
 }
+// --- V43.0 改造 END ---
 
 function processVoice(voiceText, sheetId) {
   try {
@@ -646,6 +689,7 @@ function enrichAndMergeData(newData, oldRowData, newSource) {
 // AI 呼叫函式
 // =================================================================================================
 
+// --- V43.0 強化 START ---
 function callGeminiForNormalization(inputText, messageDate) {
   const prompt = `
 你是一位專業、嚴謹的數據正規化 AI。你的唯一任務是將一段非結構化的文字，轉換為一個結構與欄位名稱都完全標準化的 JSON 物件。
@@ -657,16 +701,24 @@ function callGeminiForNormalization(inputText, messageDate) {
     * **輸出格式**: 你的輸出**必須**是一個**單一的、合法的 JSON 物件**。
     * **數據提取**: 這是一筆發票主紀錄。請從中提取資訊。
         * 第 3 個欄位是載具號碼 -> \`referenceNumber\`
-        * 第 4 個欄位是發票日期 -> \`timestamp\` (格式：YYYY-MM-DD)
+        * 第 4 個欄位是發票日期 -> \`timestamp\` (格式：YYYYMMDD)
         * 第 6 個欄位是商店店名 -> \`item\`
         * 第 7 個欄位是發票號碼 -> \`invoiceNumber\`
         * 第 8 個欄位是總金額 -> \`amount\`
     * **忽略非消費項目**: 如果「商店店名」中包含「自動加值」，請回傳一個空的 JSON 物件 \`{}\`。
 
-2.  **如果輸入是「其他格式」 (例如 HTML 或一般 JSON):**
-    * **輸出格式**: 你的輸出**必須**是一個**單一的、合法的 JSON 物件**。
+2.  **如果輸入是「中華電信 HTML 發票」 (特徵：包含 "中華電信電子發票開立通知" 和 "<td>" 標籤):**
+    * **輸出格式**: **必須**是**單一的、合法的 JSON 物件**。
+    * **數據提取**:
+        * 發票號碼 (例如 QC-61343374) -> \`invoiceNumber\`
+        * 總計 (例如 1000) -> \`amount\`
+        * 發票日期 (例如 2025-07-01) -> \`timestamp\`
+        * 將所有 "品名" (例如 "﹝行動月租費﹞", "﹝行動加值服務費用﹞") 合併為一個字串 -> \`item\`
+        * 將 "備註" 欄位的內容 (例如 "用戶號碼 0933*6*6*3") -> \`notes\`
+
+3.  **如果輸入是「其他格式」 (例如一般 HTML 或 JSON):**
+    * **輸出格式**: **必須**是一個**單一的、合法的 JSON 物件**。
     * **欄位對應**: 將輸入中的 \`Date\`, \`Vendor\`, \`Total\` 等鍵名，映射到標準欄位。
-    * **備註欄位 (notes)**: **僅**將看起來像是人類備註的文字放入 \`notes\` 欄位。如果找不到，此欄位**必須**為 \`null\`。**嚴禁**將其他欄位的資料或整個物件複製到 \`notes\` 欄位中。
 
 ---
 **【通用規則 (對所有格式都適用)】**
@@ -677,7 +729,22 @@ function callGeminiForNormalization(inputText, messageDate) {
 4.  **找不到的欄位**: 如果輸入中找不到對應的資訊，請在輸出中將該標準欄位設為 null。
 
 ---
-**【學習範例：CSV 單行輸入】**
+**【學習範例 1：中華電信 HTML 輸入】**
+[輸入文字]: "<html>...<font style='font-weight:Bolder;font-size:16pt'>QC-61343374</font>...<td class='tds' align='left' width='50%'>2025-07-01</td>...總計：<font color='blue'>1000</font>...<font color='blue'>﹝行動月租費﹞</font>...<font color='blue'>﹝行動加值服務費用﹞</font>...</html>"
+
+[你的標準化輸出 JSON 字串]:
+{
+  "timestamp": "2025-07-01T00:00:00",
+  "amount": 1000,
+  "currency": "TWD",
+  "category": "住",
+  "item": "中華電信 - 行動月租費, 行動加值服務費用",
+  "invoiceNumber": "QC61343374",
+  "referenceNumber": null,
+  "notes": "用戶號碼 0933*6*6*3 [114年06月帳單]"
+}
+---
+**【學習範例 2：CSV 單行輸入】**
 [輸入文字]: "M|手機條碼|/PZWC6KQ|20250501|80354145|全聯實業|NA53837567|533|開立|"
 
 [你的標準化輸出 JSON 字串]:
@@ -724,6 +791,7 @@ ${inputText}
     throw new Error(`Failed to process normalization API call: ${e.message}`);
   }
 }
+// --- V43.0 強化 END ---
 
 function callGeminiForVision(imageBlob, voiceNote) {
   const extractionPrompt = `
@@ -1015,42 +1083,6 @@ function writeToSheetFromVoice(data, sheetId, originalVoiceText) {
 // =================================================================================================
 // 輔助函式
 // =================================================================================================
-// --- V40.9 新增 START ---
-/**
- * 解析一個可能包含多個 JSON 物件的字串。
- * @param {string} jsonString - AI 回傳的、可能不標準的 JSON 字串。
- * @returns {Array} - 一個包含所有已解析的 JSON 物件的陣列。
- */
-function parseMultiJsonString(jsonString) {
-  if (!jsonString || typeof jsonString !== 'string') {
-    return [];
-  }
-
-  // 移除頭尾可能存在的非 JSON 字元 (例如 markdown 的 ```json)
-  const cleanedString = jsonString.trim().replace(/^```json\s*/, '').replace(/```\s*$/, '');
-  
-  // 檢查字串是否已經是合法的 JSON 陣列
-  if (cleanedString.startsWith('[') && cleanedString.endsWith(']')) {
-    try {
-      return JSON.parse(cleanedString);
-    } catch (e) {
-      // 如果解析失敗，繼續下面的流程
-      Logger.log("字串看起來像陣列，但解析失敗，嘗試使用備用方法。");
-    }
-  }
-
-  // 備用方法：將字串用 "},{" 分割，並補全括號
-  try {
-    // 加上外層的 [] 使其成為一個合法的 JSON 陣列字串
-    const arrayString = `[${cleanedString}]`;
-    return JSON.parse(arrayString);
-  } catch (e) {
-    Logger.log(`[parseMultiJsonString Error] 無法將字串解析為 JSON 陣列: ${e.toString()}`);
-    return []; // 如果最終還是失敗，回傳空陣列
-  }
-}
-// --- V40.9 新增 END ---
-
 function isDuplicate(data, rawText, sheetId) {
   const cleanSheetId = sanitizeSheetId(sheetId);
   const sheet = SpreadsheetApp.openById(cleanSheetId).getSheetByName(SHEET_NAME);
