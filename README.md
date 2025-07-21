@@ -24,6 +24,10 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
 * **⚙️ 動態規則引擎 (Dynamic Rule Engine):** 所有郵件處理規則都在 Google Sheets 中進行設定，無需修改程式碼。
 * **🔔 彈性通報中心 (Flexible Notification Hub):** 可在 Google Sheets 中自訂錯誤通知渠道 (Email, Webhook for Slack/Discord) 和等級。
 * **🔐 數據主權 (Data Sovereignty):** 所有數據與程式碼 100% 儲存在您自己的 Google 帳戶中。
+- **[新] 代墊款追蹤器 (IOU Tracker)**:
+    -   **AI 語意解析**：能從日常對話中，自動建立、結清或查詢代墊款項。
+    -   **結算引擎**：支援無金額結算，並透過語意正規化引擎，準確匹配人名。
+    -   **群組拆分**：支援「一對多」的代墊場景，能自動將總金額均分給多位參與者。
 
 ### 架構 / Architecture
 

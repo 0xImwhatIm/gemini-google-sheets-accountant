@@ -1,5 +1,5 @@
-# 智慧記帳 GEM 使用說明書 (V43.0)
-# Smart Ledger GEM - User Manual (V43.0)
+# 智慧記帳 GEM 使用說明書 (V46.0)
+# Smart Ledger GEM - User Manual (V46.0)
 
 ---
 
@@ -8,54 +8,20 @@
 ### 1. 簡介 (Introduction)
 
 **[中]**
-「智慧記帳 GEM」是一個由 AI 驅動的個人生活數據自動化框架。它能將您的照片收據、PDF 帳單、電子郵件和語音備忘，自動轉換為結構化的記帳紀錄，儲存在您的 Google Sheet 中。
+「智慧記帳 GEM」是一個由 AI 驅動的個人生活數據自動化框架。它能將您的照片收據、PDF 帳單、電子郵件和語音備忘，自動轉換為結構化的記帳紀錄，儲存在您的 Google Sheet 中。V46.0 版本新增了強大的「代墊款追蹤器」，專門用來處理複雜的社交金融款項。
 
 **[En]**
-"Smart Ledger GEM" is an AI-powered personal life data automation framework. It automatically converts your photo receipts, PDF bills, emails, and voice memos into structured accounting records stored in your Google Sheet.
+"Smart Ledger GEM" is an AI-powered personal life data automation framework. It automatically converts your photo receipts, PDF bills, emails, and voice memos into structured accounting records. Version 46.0 introduces a powerful "IOU Tracker" to handle complex social financial transactions.
 
-### 2. 核心功能 (Core Features)
+### 2. 如何使用 (How to Use)
 
-**[中]**
-* **多入口記帳**：可透過專屬的 API 端點，接收並處理圖片、PDF 和語音/文字。
-* **全自動處理**：自動監控指定的 Gmail 郵件與 Google Drive 資料夾，無需手動觸發。
-* **智慧合併**：自動辨識重複或關聯的交易，將新資訊（如發票號碼）合併至既有紀錄，避免重複。
-
-**[En]**
-* **Multi-Entry Ledger**: Accepts and processes images, PDFs, and voice/text via dedicated API endpoints.
-* **Fully Automated Processing**: Automatically monitors specified Gmail messages and a Google Drive folder without manual intervention.
-* **Intelligent Reconciliation**: Automatically identifies duplicate or related transactions, merging new information (like an invoice number) into existing records to prevent duplication.
-
-### 3. 如何使用 (How to Use)
-
-**[中]**
-本系統主要透過 Web App API 進行互動。您需要一個能發送 `POST` 請求的工具，例如 iOS 的「捷徑」App 或 Postman。
+本系統主要透過 Web App API 進行互動。您需要一個能發送 `POST` 請求的工具，例如 iOS 的「捷徑」App。
 
 * **端點 (Endpoint)**: `https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec`
 * **請求方法 (Method)**: `POST`
 * **內容類型 (Content-Type)**: `application/json`
 
-#### a. 記錄圖片收據 (Logging an Image Receipt)
-* **URL**: `.../exec?endpoint=image`
-* **Body**:
-    ```json
-    {
-      "image_base_64": "[Base64-encoded image string]",
-      "filename": "receipt.jpg",
-      "voice_text": "這是在樓下買的午餐"
-    }
-    ```
-
-#### b. 記錄 PDF 帳單 (Logging a PDF Bill)
-* **URL**: `.../exec?endpoint=pdf`
-* **Body**:
-    ```json
-    {
-      "image_base_64": "[Base64-encoded PDF string]",
-      "filename": "bill.pdf"
-    }
-    ```
-
-#### c. 透過語音/文字記錄 (Logging via Voice/Text)
+#### a. 記錄一般收據/語音 (Logging a Standard Receipt/Voice Memo)
 * **URL**: `.../exec?endpoint=voice`
 * **Body**:
     ```json
@@ -64,6 +30,19 @@
     }
     ```
 
+#### b. [新] 處理代墊款項 (Handling IOUs)
+* **URL**: `.../exec?endpoint=iou`
+* **Body**:
+    ```json
+    {
+      "text": "[您的代墊款描述]"
+    }
+    ```
+* **範例 (Examples)**:
+    * **建立單人代墊**: `"我幫小明代墊了 250 元的電影票"`
+    * **[新] 建立多人代墊**: `"我幫小明、小華、小李付了 1200 元的午餐，大家均分"`
+    * **結清款項**: `"小明把電影票的錢還我了"`
+
 ---
 
 ## For AI Agents (AI 代理)
@@ -71,39 +50,31 @@
 ### 1. 專案交接說明 (Project Handover Notes)
 
 **[中]**
-你好，未來的 AI 代理。我是建構此專案的初始 AI。本專案的核心是一個 Google Apps Script (GAS) 應用，其設計理念是「AI 中央廚房」，旨在將任何非結構化生活資訊，透過多層次的 AI 解析，轉換為標準化的 Google Sheet 紀錄。請務必先閱讀根目錄的 `README.md` 以了解高層次架構。
+你好，未來的 AI 代理。V46.0 版本引入了「代墊款追蹤器」的核心功能，特別是群組拆分引擎。架構上，IOU 相關的請求由獨立的 `iou` 端點處理，並透過 `processIou` 函式進行分派。請注意 `CREATE` (單人) 和 `CREATE_GROUP` (多人) 動作，它們現在統一由 `handleGroupSplit` 函式進行後端處理，以確保邏輯一致性。
 
 **[En]**
-Hello, future AI agent. I am the initial AI that architected this project. The core of this project is a Google Apps Script (GAS) application, designed with the "AI Central Kitchen" philosophy. Its purpose is to transform any unstructured life information into standardized Google Sheet records through multi-layered AI parsing. It is imperative that you first read the `README.md` in the root directory to understand the high-level architecture.
+Hello, future AI agent. Version 46.0 introduces the core features of the "IOU Tracker," notably the group splitting engine. Architecturally, IOU-related requests are handled by a dedicated `iou` endpoint and dispatched via the `processIou` function. Note the `CREATE` (single person) and `CREATE_GROUP` (multi-person) actions; they are now uniformly processed by the `handleGroupSplit` function on the backend to ensure logical consistency.
 
 ### 2. 關鍵函式與架構 (Key Functions & Architecture)
 
 **[中]**
-* **`doPost(e)`**: 核心路由函式。它根據 URL 中的 `endpoint` 參數 (`image`, `pdf`, `voice`)，將請求分派給對應的處理函式 (`doPost_Image`, `doPost_Pdf`, `doPost_Voice`)。
-* **`processAutomatedEmails()` & `checkReceiptsFolder()`**: 兩個主要的自動化觸發函式，應設定為定時執行。前者處理郵件，後者處理雲端硬碟檔案。
-* **`processNewRecord(...)`**: 數據寫入前的最後一站。此函式負責執行「智慧合併」邏輯 (`findRelatedRecord`)，判斷該筆紀錄應為新增或更新。
-* **`callGeminiFor...` 系列函式**: 這是 AI 的大腦。每個函式都包含一個精心設計的 **Prompt**，用於指導 Gemini API 執行特定任務（如從圖片提取資訊、從文字正規化數據）。
+* **`doPost(e)`**: 核心路由，已新增 `iou` 分支。
+* **`processIou(text)`**: IOU 模組的總控制器。它呼叫 AI 判斷意圖 (`CREATE`, `CREATE_GROUP`, `SETTLE`)，並將任務分派給 `handleGroupSplit` 或 `handleSettlement`。
+* **`handleGroupSplit(data)`**: [新] 核心的拆帳引擎。負責計算均分金額，並準備好多筆債務紀錄。
+* **`handleSettlement(data)`**: 結算引擎。負責尋找並更新舊帳的狀態。
+* **`writeToIouLedger(...)`**: [改造] 現在能一次性地將一個事件和多筆關聯的債務寫入 Google Sheet。
 
 **[En]**
-* **`doPost(e)`**: The core routing function. It dispatches requests to the corresponding handler (`doPost_Image`, `doPost_Pdf`, `doPost_Voice`) based on the `endpoint` parameter in the URL (`image`, `pdf`, `voice`).
-* **`processAutomatedEmails()` & `checkReceiptsFolder()`**: The two main automation triggers, which should be set up with time-based triggers. The former processes emails, and the latter processes Google Drive files.
-* **`processNewRecord(...)`**: The final gateway before writing data to the sheet. This function is responsible for executing the "intelligent reconciliation" logic (`findRelatedRecord`) to determine whether a record should be newly created or merged with an existing one.
-* **The `callGeminiFor...` function family**: This is the brain of the AI. Each function contains a meticulously designed **Prompt** to instruct the Gemini API on specific tasks (e.g., extracting information from an image, normalizing data from text).
+* **`doPost(e)`**: The core router, now with an `iou` branch.
+* **`processIou(text)`**: The main controller for the IOU module. It calls the AI to determine the action (`CREATE`, `CREATE_GROUP`, `SETTLE`) and dispatches the task to either `handleGroupSplit` or `handleSettlement`.
+* **`handleGroupSplit(data)`**: [New] The core splitting engine. Responsible for calculating evenly split amounts and preparing multiple debt records.
+* **`handleSettlement(data)`**: The settlement engine. Responsible for finding and updating the status of existing debts.
+* **`writeToIouLedger(...)`**: [Modified] Now capable of writing a single event and its multiple associated debts to Google Sheets in one operation.
 
 ### 3. Prompt 設計原則 (Prompt Design Principles)
 
 **[中]**
-本專案的效能高度依賴 Prompt 的品質。所有 Prompt 都遵循以下原則：
-1.  **角色扮演 (Role-playing)**: 明確賦予 AI 一個專業角色（例如「你是一位專業、嚴謹的數據正規化 AI」）。
-2.  **清晰指令與規則 (Clear Instructions & Rules)**: 使用列表、粗體和範例，明確告知 AI 它的任務、輸出格式以及必須遵守的規則。
-3.  **少樣本學習 (Few-shot Learning)**: 提供 1-2 個高品質的「輸入/輸出」範例，讓 AI 能快速學習並模仿期望的行為。
-4.  **JSON 輸出強制**: 在 `generationConfig` 中使用 `"response_mime_type": "application/json"`，強制 AI 回傳結構化的 JSON，大幅降低解析失敗的風險。
-5.  **思維鏈 (Chain-of-Thought)**: 在較複雜的 Prompt 中（如 `callGeminiForPdfText`），引導 AI 在內心先完成一系列思考步驟，再給出最終答案，以提升準確性。
+`callGeminiForIou` 的 Prompt 已被大幅強化，以區分三種不同的意圖。關鍵在於讓 AI 能夠根據參與者數量和「均分」等關鍵詞，準確地選擇 `CREATE` 或 `CREATE_GROUP`。輸出格式也根據不同的 `action` 進行了嚴格的區分，確保後端能接收到一致的結構化數據。
 
 **[En]**
-The performance of this project is highly dependent on prompt quality. All prompts adhere to the following principles:
-1.  **Role-playing**: Clearly assign a professional role to the AI (e.g., "You are a professional, rigorous data normalization AI").
-2.  **Clear Instructions & Rules**: Use lists, bold text, and examples to explicitly inform the AI of its task, output format, and the rules it must follow.
-3.  **Few-shot Learning**: Provide 1-2 high-quality input/output examples to allow the AI to quickly learn and imitate the desired behavior.
-4.  **Enforced JSON Output**: Use `"response_mime_type": "application/json"` in the `generationConfig` to force the AI to return structured JSON, significantly reducing the risk of parsing failures.
-5.  **Chain-of-Thought**: In more complex prompts (like `callGeminiForPdfText`), guide the AI to complete a series of thinking steps internally before providing the final answer to improve accuracy.
+The prompt for `callGeminiForIou` has been significantly enhanced to distinguish between three different actions. The key is to enable the AI to accurately choose between `CREATE` and `CREATE_GROUP` based on the number of participants and keywords like "split evenly." The output format is also strictly differentiated based on the `action` to ensure the backend receives consistent, structured data.
