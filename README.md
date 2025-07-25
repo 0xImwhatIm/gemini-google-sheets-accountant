@@ -28,6 +28,15 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
     -   **AI 語意解析**：能從日常對話中，自動建立、結清或查詢代墊款項。
     -   **結算引擎**：支援無金額結算，並透過語意正規化引擎，準確匹配人名。
     -   **群組拆分**：支援「一對多」的代墊場景，能自動將總金額均分給多位參與者。
+- **[新] Phase 4 專業錯誤處理系統 (V46.1)**:
+    -   **智慧錯誤檢測**：自動檢測 15+ 種錯誤類型，包含系統級、資料級、業務級和使用者級錯誤。
+    -   **事務安全保障**：完整的事務管理機制，確保多步驟操作的原子性，失敗時自動回滾。
+    -   **自動恢復機制**：基於檢查點的中斷恢復系統，操作中斷時可自動從最後檢查點恢復。
+    -   **一致性監控**：持續監控帳本間的資料一致性，自動檢測並修復不一致問題。
+    -   **智慧通知系統**：根據錯誤嚴重程度自動選擇通知策略，支援頻率控制和去重機制。
+    -   **完整測試套件**：包含單元測試、整合測試和手動驗證功能。
+    -   **8 個核心組件**：錯誤處理器、事務管理器、一致性檢查器、通知管理器、檢測器、處理器、恢復管理器、整合管理器。
+    -   **測試函數**：`manualErrorHandlingTest()`, `manualErrorDetectionTest()`, `manualConsistencyCheckTest()` 可直接在 Apps Script 編輯器中執行驗證。
 
 ### 架構 / Architecture
 
@@ -38,7 +47,7 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
 ### 開始使用 / Getting Started
 
 **[中文]**
-詳細的部署步驟，請參考我們的 `DEPLOYMENT_GUIDE.md`（即將推出）。您需要具備一些基礎的技術能力，例如：
+詳細的部署步驟，請參考我們的 [部署指南 (DEPLOYMENT_GUIDE.md)](DEPLOYMENT_GUIDE.md)。您需要具備一些基礎的技術能力，例如：
 
 1.  擁有一個 Google 帳戶。
 2.  知道如何複製 Google Sheet 並打開 Apps Script 編輯器。
@@ -46,12 +55,40 @@ This is not a traditional accounting app. It's a powerful backend engine that yo
 4.  知道如何在 Apps Script 中部署網路應用程式及設定時間觸發器。
 
 **[English]**
-For detailed deployment steps, please refer to our `DEPLOYMENT_GUIDE.md` (coming soon). You will need some basic technical skills, such as:
+For detailed deployment steps, please refer to our [Deployment Guide (DEPLOYMENT_GUIDE.md)](DEPLOYMENT_GUIDE.md). You will need some basic technical skills, such as:
 
 1.  Having a Google account.
 2.  Knowing how to copy a Google Sheet and open the Apps Script editor.
 3.  Being able to obtain and set up your Google Gemini API key.
 4.  Knowing how to deploy a web app and set up time-driven triggers in Apps Script.
+
+### 文檔結構 / Documentation Structure
+
+**🚀 快速開始**
+- [部署指南 (Deployment Guide)](DEPLOYMENT_GUIDE.md)
+- [部署檢查清單 (Deployment Checklist)](DEPLOYMENT_CHECKLIST.md)
+- [維護指南 (Maintenance Guide)](MAINTENANCE_GUIDE.md)
+
+**🔧 開發與管理**
+- [測試指南 (Testing Guide)](TESTING_GUIDE.md)
+- [錯誤處理指南 (Error Handling Guide)](ERROR_HANDLING_GUIDE.md)
+- [Phase 4 錯誤處理指南 (Phase 4 Error Handling Guide)](PHASE4_ERROR_HANDLING_GUIDE.md)
+- [Phase 4 故障排除指南 (Phase 4 Troubleshooting)](PHASE4_TROUBLESHOOTING.md)
+- [Phase 4 配置參考 (Phase 4 Configuration)](PHASE4_CONFIGURATION.md)
+- [Phase 4 監控指南 (Phase 4 Monitoring)](PHASE4_MONITORING.md)
+- [配置管理指南 (Configuration Management)](CONFIG_MANAGEMENT.md)
+- [資料治理指南 (Data Governance)](DATA_GOVERNANCE.md)
+- [效能優化指南 (Performance Guide)](PERFORMANCE_GUIDE.md)
+- [安全性指南 (Security Guide)](SECURITY_GUIDE.md)
+
+**🛠️ 輔助工具**
+- [環境變數範本 (.env.example)](.env.example)
+- [Google Sheets 模板設定腳本 (setup-sheets-template.gs)](setup-sheets-template.gs)
+- [快速啟動測試腳本 (quick-start.gs)](quick-start.gs)
+- [配置管理器 (ConfigManager.gs)](ConfigManager.gs)
+- [配置快速設定腳本 (config-setup.gs)](config-setup.gs)
+- [配置管理 Web 介面 (config-web-ui.gs)](config-web-ui.gs)
+- [配置管理測試腳本 (config-tests.gs)](config-tests.gs)
 
 ### 如何貢獻 / How to Contribute
 
