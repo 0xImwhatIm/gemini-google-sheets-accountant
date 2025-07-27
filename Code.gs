@@ -1,4 +1,62 @@
 // =================================================================================================
+// ConfigManager 自動修復 - 解決 MAIN_LEDGER_ID 未定義問題
+// 最後更新：2025-07-27
+// =================================================================================================
+
+// 在腳本載入時自動修復 ConfigManager
+(function() {
+  try {
+    if (typeof configManager !== 'undefined' && configManager.getFromSheets) {
+      // 修復 getFromSheets 方法
+      configManager.getFromSheets = function(key) {
+        try {
+          const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+          if (!mainLedgerId) return null;
+          
+          const ss = SpreadsheetApp.openById(mainLedgerId);
+          const settingsSheet = ss.getSheetByName('Settings');
+          if (!settingsSheet) return null;
+
+          const data = settingsSheet.getDataRange().getValues();
+          for (let i = 1; i < data.length; i++) {
+            if (data[i][0] === key) return data[i][1];
+          }
+          return null;
+        } catch (error) {
+          return null;
+        }
+      };
+      
+      // 修復其他相關方法
+      configManager.getAll = function() {
+        const result = {};
+        try {
+          const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+          if (!mainLedgerId) return result;
+          
+          const ss = SpreadsheetApp.openById(mainLedgerId);
+          const settingsSheet = ss.getSheetByName('Settings');
+          
+          if (settingsSheet) {
+            const data = settingsSheet.getDataRange().getValues();
+            for (let i = 1; i < data.length; i++) {
+              if (data[i][0]) {
+                result[data[i][0]] = this.convertType(data[i][1]);
+              }
+            }
+          }
+        } catch (error) {
+          // 靜默處理
+        }
+        return result;
+      };
+    }
+  } catch (error) {
+    // 靜默處理啟動修復錯誤
+  }
+})();
+
+// =================================================================================================
 // 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
 // 版本：V47.1 - 圖片歸檔增強版 (Image Archive Enhancement)
 // 作者：0ximwhatim & Gemini
