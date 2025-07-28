@@ -6,11 +6,16 @@ function fixExistingColumnData() {
   Logger.log('=== 開始修正現有錯誤資料 ===');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
+    const sheetName = getConfig('SHEET_NAME', 'All Records');
+    const sheet = ss.getSheetByName(sheetName);
     
     if (!sheet) {
-      throw new Error(`找不到工作表: ${SHEET_NAME}`);
+      throw new Error(`找不到工作表: ${sheetName}`);
     }
     
     const dataRange = sheet.getDataRange();
@@ -163,11 +168,16 @@ function resetTableStructure() {
   Logger.log('=== 重新設定表格結構 ===');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
+    const sheetName = getConfig('SHEET_NAME', 'All Records');
+    const sheet = ss.getSheetByName(sheetName);
     
     if (!sheet) {
-      throw new Error(`找不到工作表: ${SHEET_NAME}`);
+      throw new Error(`找不到工作表: ${sheetName}`);
     }
     
     // 備份現有資料
@@ -223,11 +233,16 @@ function forceResetTableStructure() {
   }
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
+    const sheetName = getConfig('SHEET_NAME', 'All Records');
+    const sheet = ss.getSheetByName(sheetName);
     
     if (!sheet) {
-      throw new Error(`找不到工作表: ${SHEET_NAME}`);
+      throw new Error(`找不到工作表: ${sheetName}`);
     }
     
     // 清除所有內容
@@ -263,11 +278,16 @@ function checkCurrentTableStructure() {
   Logger.log('=== 檢查目前表格結構 ===');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(SHEET_NAME);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
+    const sheetName = getConfig('SHEET_NAME', 'All Records');
+    const sheet = ss.getSheetByName(sheetName);
     
     if (!sheet) {
-      throw new Error(`找不到工作表: ${SHEET_NAME}`);
+      throw new Error(`找不到工作表: ${sheetName}`);
     }
     
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];

@@ -90,7 +90,11 @@ class ConfigManager {
    */
   getFromSheets(key) {
     try {
-      const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+      const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+      if (!mainLedgerId) {
+        return null;
+      }
+      const ss = SpreadsheetApp.openById(mainLedgerId);
       const settingsSheet = ss.getSheetByName('Settings');
       
       if (!settingsSheet) return null;
@@ -112,7 +116,11 @@ class ConfigManager {
    * 寫入配置到 Google Sheets
    */
   setToSheets(key, value) {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+    const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
     const settingsSheet = ss.getSheetByName('Settings');
     
     if (!settingsSheet) {
@@ -278,7 +286,11 @@ class ConfigManager {
     
     // 從 Sheets 獲取所有配置
     try {
-      const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+      const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+      if (!mainLedgerId) {
+        return result;
+      }
+      const ss = SpreadsheetApp.openById(mainLedgerId);
       const settingsSheet = ss.getSheetByName('Settings');
       
       if (settingsSheet) {
@@ -356,7 +368,11 @@ class ConfigManager {
         source: 'ConfigManager'
       };
       
-      const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+      const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+      if (!mainLedgerId) {
+        return;
+      }
+      const ss = SpreadsheetApp.openById(mainLedgerId);
       let logSheet = ss.getSheetByName('ConfigLogs');
       
       if (!logSheet) {
@@ -421,7 +437,11 @@ function initializeConfigs() {
   ];
 
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+    const mainLedgerId = PropertiesService.getScriptProperties().getProperty('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定，無法初始化預設配置');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
     const settingsSheet = ss.getSheetByName('Settings');
     
     if (!settingsSheet) {

@@ -20,7 +20,11 @@ function quickHealthCheck() {
   
   try {
     // 檢查 Google Sheets 存取
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
     console.log('✅ Google Sheets 存取正常');
     results.sheetsAccess = true;
     
@@ -79,7 +83,11 @@ function testVoiceFunction() {
   
   try {
     const testText = "今天買咖啡花了 150 元";
-    const result = processVoice(testText, MAIN_LEDGER_ID);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const result = processVoice(testText, mainLedgerId);
     
     if (result) {
       console.log('✅ 語音記帳測試成功');
@@ -161,7 +169,11 @@ function createTestData() {
   console.log('📝 建立測試資料...');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
     const allRecordsSheet = ss.getSheetByName('All Records');
     
     if (!allRecordsSheet) {
@@ -195,7 +207,11 @@ function cleanupTestData() {
   console.log('🧹 清理測試資料...');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
+    const mainLedgerId = getConfig('MAIN_LEDGER_ID');
+    if (!mainLedgerId) {
+      throw new Error('MAIN_LEDGER_ID 未設定');
+    }
+    const ss = SpreadsheetApp.openById(mainLedgerId);
     const allRecordsSheet = ss.getSheetByName('All Records');
     
     if (!allRecordsSheet) {
@@ -233,9 +249,9 @@ function cleanupTestData() {
  */
 function showSystemInfo() {
   console.log('ℹ️ 系統資訊：');
-  console.log('Google Sheets ID：' + MAIN_LEDGER_ID);
-  console.log('GCP 專案 ID：' + GCP_PROJECT_ID);
-  console.log('API 金鑰狀態：' + (GEMINI_API_KEY && GEMINI_API_KEY !== 'YOUR_GEMINI_API_KEY_HERE' ? '已設定' : '未設定'));
+  console.log('Google Sheets ID：' + getConfig('MAIN_LEDGER_ID'));
+  console.log('GCP 專案 ID：' + getConfig('GCP_PROJECT_ID'));
+  console.log('API 金鑰狀態：' + (getConfig('GEMINI_API_KEY') && getConfig('GEMINI_API_KEY') !== 'YOUR_GEMINI_API_KEY_HERE' ? '已設定' : '未設定'));
   console.log('Apps Script 版本：V46.0');
   console.log('執行時間：' + new Date().toLocaleString('zh-TW'));
 }

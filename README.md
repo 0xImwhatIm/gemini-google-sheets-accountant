@@ -1,4 +1,9 @@
-# 智慧記帳 GEM (Gemini AI Accountant)
+# 智慧記帳 GEM (Gemini AI Accountant) V47.3
+
+[![Version](https://img.shields.io/badge/version-V47.3-blue.svg)](https://github.com/your-repo/releases)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Google%20Apps%20Script-yellow.svg)](https://script.google.com)
+[![AI](https://img.shields.io/badge/AI-Gemini%20Vision-purple.svg)](https://ai.google.dev)
 
 **[中文]**
 一個可自託管的、由 AI 驅動的個人生活數據自動化框架。
@@ -16,13 +21,20 @@ An AI-driven, self-hostable framework for personal life-data automation.
 **[English]**
 This is not a traditional accounting app. It's a powerful backend engine that you deploy in your own Google Account. It's designed to receive unstructured data from various sources (photos, voice, PDFs, emails), process it using Google Gemini AI into structured financial or life records, and save it to your Google Sheet.
 
+### 🆕 V47.3 新功能亮點 / V47.3 New Features
+
+* **🏢 商務發票智慧識別 (Business Invoice Recognition):** 自動識別統一發票號碼、收據編號、買賣方資訊，完美支援台灣商務記帳需求
+* **🌍 多語言 OCR 翻譯 (Multi-language OCR Translation):** 外文收據自動翻譯為繁體中文，支援旅行記帳和國際商務
+* **📱 iOS 捷徑完整支援 (Full iOS Shortcuts Support):** 拍照+語音記帳功能穩定，錯誤處理完善
+* **🎯 一張收據一個旅行回憶 (Travel Memory System):** 完整保存商家資訊、地點資料，支援社交分享需求
+
 ### 核心功能 / Core Features
 
-* **📊 交易列表處理 (Transaction List Processing):** (V40.0 新功能) 能夠智慧地解析像 IC 卡消費紀錄這樣的螢幕截圖，自動將多筆交易拆分、逐一記錄，並能準確區分「消費」與「儲值」。
-* **🧠 兩段式 AI 引擎 (Two-Pass AI Engine):** 採用革命性的「提取-正規化」架構，第一層 AI 負責最大化提取資訊，第二層 AI 負責將其轉換為標準格式，極大提升了對複雜單據的辨識成功率與穩定性。
-* **✨ 智慧合併引擎 (Smart Reconciliation Engine):** 獨家的 `processNewRecord` 邏輯，能自動合併關聯紀錄、補充缺失資訊，徹底解決重複記帳問題。
-* **⚙️ 動態規則引擎 (Dynamic Rule Engine):** 所有郵件處理規則都在 Google Sheets 中進行設定，無需修改程式碼。
-* **🔔 彈性通報中心 (Flexible Notification Hub):** 可在 Google Sheets 中自訂錯誤通知渠道 (Email, Webhook for Slack/Discord) 和等級。
+* **📊 交易列表處理 (Transaction List Processing):** 能夠智慧地解析像 IC 卡消費紀錄這樣的螢幕截圖，自動將多筆交易拆分、逐一記錄，並能準確區分「消費」與「儲值」
+* **🧠 兩段式 AI 引擎 (Two-Pass AI Engine):** 採用革命性的「提取-正規化」架構，第一層 AI 負責最大化提取資訊，第二層 AI 負責將其轉換為標準格式，極大提升了對複雜單據的辨識成功率與穩定性
+* **✨ 智慧合併引擎 (Smart Reconciliation Engine):** 獨家的 `processNewRecord` 邏輯，能自動合併關聯紀錄、補充缺失資訊，徹底解決重複記帳問題
+* **⚙️ 動態規則引擎 (Dynamic Rule Engine):** 所有郵件處理規則都在 Google Sheets 中進行設定，無需修改程式碼
+* **🔔 彈性通報中心 (Flexible Notification Hub):** 可在 Google Sheets 中自訂錯誤通知渠道 (Email, Webhook for Slack/Discord) 和等級
 * **🔐 數據主權 (Data Sovereignty):** 所有數據與程式碼 100% 儲存在您自己的 Google 帳戶中。
 - **[新] 代墊款追蹤器 (IOU Tracker)**:
     -   **AI 語意解析**：能從日常對話中，自動建立、結清或查詢代墊款項。

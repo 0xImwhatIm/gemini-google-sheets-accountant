@@ -1,6 +1,23 @@
 // =================================================================================================
+// 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
+// 版本：V47.3 - 商務發票識別與多語言翻譯版 (Business Invoice Recognition & Multi-language Translation)
+// 作者：0ximwhatim & Gemini
+// 最後更新：2025-07-28
+// 說明：此版本大幅優化了商務發票識別功能，並新增多語言 OCR 翻譯能力。
+//      - [重大修正] MAIN_LEDGER_ID 重複宣告錯誤修正：解決系統啟動失敗問題
+//      - [重大修正] iOS 捷徑 POST 資料處理修正：完善錯誤處理和診斷功能
+//      - [重大新增] 商務發票智慧識別：統一發票號碼、收據編號、買賣方資訊自動提取
+//      - [重大新增] 多語言 OCR 翻譯：外文收據自動翻譯為繁體中文，支援旅行記帳
+//      - [重大新增] 完整 OCR 文字記錄：S 欄位記錄收據完整文字，支援「一張收據一個旅行回憶」
+//      - [功能增強] 豐富元數據系統：U 欄位包含商家資訊、商品明細、翻譯狀態等詳細資訊
+//      - [商務功能] J/K/L/M/N 欄位智慧填入：統一發票號碼、收據編號、買賣方統編自動識別
+//      - [企業級] 配置管理優化：新增快速設定函數，簡化部署流程
+//      - [向後相容] 保持所有現有功能不變，大幅提升商務和旅行記帳體驗
+// =================================================================================================
+
+// =================================================================================================
 // ConfigManager 自動修復 - 解決 MAIN_LEDGER_ID 未定義問題
-// 最後更新：2025-07-27
+// 最後更新：2025-07-28
 // =================================================================================================
 
 // 在腳本載入時自動修復 ConfigManager
@@ -57,26 +74,13 @@
 })();
 
 // =================================================================================================
-// 專案名稱：智慧記帳 GEM (Gemini AI Accountant)
-// 版本：V47.1 - 圖片歸檔增強版 (Image Archive Enhancement)
-// 作者：0ximwhatim & Gemini
-// 最後更新：2025-07-25
-// 說明：此版本修正了拍照記帳功能並新增圖片歸檔增強功能。
-//      - [重大修正] 拍照記帳 JSON 解析錯誤修正：解決 undefined 錯誤問題
-//      - [重大修正] 電子發票自動處理功能修正：修正觸發器調用問題
-//      - [重大新增] 圖片歸檔增強功能：分類前綴檔名 + 超連結生成
-//      - [重大新增] Archives 資料夾自動管理：智慧檔案歸檔系統
-//      - [功能增強] 匯率計算內嵌化：提升穩定性和效能
-//      - [重大新增] 組合資料處理：圖片+語音的綜合分析能力
-//      - [功能強化] Phase 4 錯誤處理：所有新功能都整合企業級錯誤管理
-//      - [向後相容] 保持所有現有功能不變，新增 iOS 行動端支援
-// =================================================================================================
-
-// =================================================================================================
-// 【配置管理整合】V47.0 更新
+// 【配置管理整合】V47.3 更新
 // =================================================================================================
 // 注意：現在使用 ConfigManager 來管理所有配置，提供更好的靈活性和安全性
-// 如果您是首次部署，請執行 configSetupWizard() 來初始化配置
+// 如果您是首次部署，請執行以下快速設定：
+// 1. setupMainLedgerId("你的Google_Sheets_ID") - 設定主帳本 ID
+// 2. setupGeminiApiKey("你的Gemini_API金鑰") - 設定 AI 金鑰
+// 3. checkCurrentConfig() - 檢查配置狀態
 
 // 配置獲取函數（向後相容）
 function getConfig(key, defaultValue = null) {
@@ -227,7 +231,25 @@ function doGet(e) {
 
 function doPost(e) {
   return withPhase4ErrorHandling(() => {
+    // 檢查基本參數
+    if (!e || !e.parameter) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: '缺少請求參數'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
     const endpoint = e.parameter.endpoint;
+    
+    // 檢查 endpoint 參數
+    if (!endpoint) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        message: '缺少 endpoint 參數。請在 URL 中指定 ?endpoint=image, ?endpoint=voice, ?endpoint=pdf, 或 ?endpoint=iou'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // 路由到對應的處理函數
     if (endpoint === 'image') {
       return doPost_Image(e);
     } else if (endpoint === 'voice') {
@@ -239,10 +261,10 @@ function doPost(e) {
     } else {
       return ContentService.createTextOutput(JSON.stringify({
         status: 'error',
-        message: '無效的 API 端點。請在 URL 中指定 ?endpoint=image, ?endpoint=voice, ?endpoint=pdf, 或 ?endpoint=iou'
+        message: `無效的 API 端點: ${endpoint}。支援的端點: image, voice, pdf, iou`
       })).setMimeType(ContentService.MimeType.JSON);
     }
-  }, { endpoint: e.parameter.endpoint }, 'doPost');
+  }, { endpoint: e.parameter ? e.parameter.endpoint : 'unknown' }, 'doPost');
 }
 
 // =================================================================================================
@@ -250,6 +272,9 @@ function doPost(e) {
 // =================================================================================================
 function doPost_Iou(e) {
   return withPhase4ErrorHandling(() => {
+    if (!e.postData || !e.postData.contents) {
+      throw new Error("缺少 POST 資料。請確認使用 POST 方法發送資料");
+    }
     const params = JSON.parse(e.postData.contents);
     const text = params.text;
     if (!text) throw new Error("缺少 text 參數。");
@@ -840,7 +865,18 @@ function sendNotification(title, message, level = 'INFO') {
 // =================================================================================================
 function doPost_Image(e) {
   return withPhase4ErrorHandling(() => {
-    const params = JSON.parse(e.postData.contents);
+    // 檢查 POST 資料是否存在
+    if (!e.postData || !e.postData.contents) {
+      throw new Error("缺少 POST 資料。請確認 iOS 捷徑設定正確，並使用 POST 方法發送資料");
+    }
+    
+    let params;
+    try {
+      params = JSON.parse(e.postData.contents);
+    } catch (parseError) {
+      throw new Error("JSON 解析失敗。請檢查 POST 資料格式：" + parseError.toString());
+    }
+    
     const imageData = params.image;
     const filename = params.filename || 'image.jpg';
     const voiceNote = params.voiceNote || '';
@@ -911,7 +947,7 @@ function doPost_Image(e) {
       data: parsedData
     })).setMimeType(ContentService.MimeType.JSON);
     
-  }, { endpoint: 'image', method: 'POST', hasVoiceNote: !!e.postData.contents.includes('voiceNote') }, 'doPost_Image');
+  }, { endpoint: 'image', method: 'POST', hasVoiceNote: !!(e.postData && e.postData.contents && e.postData.contents.includes('voiceNote')) }, 'doPost_Image');
 }
 
 // =================================================================================================
@@ -995,6 +1031,9 @@ function doGet_Iou(e) {
 // =================================================================================================
 function doPost_Voice(e) {
   return withPhase4ErrorHandling(() => {
+    if (!e.postData || !e.postData.contents) {
+      throw new Error("缺少 POST 資料。請確認使用 POST 方法發送資料");
+    }
     const params = JSON.parse(e.postData.contents);
     const text = params.text;
     if (!text) throw new Error("缺少 text 參數。");
@@ -1075,6 +1114,97 @@ function checkReceiptsFolder() {
 }
 
 // =================================================================================================
+// 【V47.3 新增】OCR 翻譯功能
+// =================================================================================================
+
+/**
+ * 使用 Gemini API 翻譯文字
+ * @param {string} text - 要翻譯的文字
+ * @param {string} sourceLanguage - 來源語言
+ * @param {string} targetLanguage - 目標語言 (預設繁體中文)
+ * @returns {string} 翻譯後的文字
+ */
+function translateText(text, sourceLanguage = 'auto', targetLanguage = 'zh-TW') {
+  try {
+    if (!text || text.trim() === '') {
+      return '';
+    }
+    
+    // 如果已經是繁體中文，不需要翻譯
+    if (sourceLanguage === 'zh-TW' || sourceLanguage === 'zh') {
+      return text;
+    }
+    
+    Logger.log(`[翻譯] 開始翻譯: ${sourceLanguage} -> ${targetLanguage}`);
+    
+    const prompt = `
+請將以下文字翻譯成繁體中文，保持原有的格式和結構：
+
+原文語言：${sourceLanguage}
+原文內容：
+${text}
+
+翻譯要求：
+1. 保持收據的原有格式和換行
+2. 商家名稱、地址等專有名詞要準確翻譯
+3. 保留數字、日期、時間等資訊不變
+4. 如果是商品名稱，提供通俗易懂的中文翻譯
+5. 保持專業和準確性
+
+請只回傳翻譯後的文字，不要添加任何解釋或註解。
+`;
+
+    const requestBody = {
+      "contents": [{
+        "parts": [{ "text": prompt }]
+      }],
+      "generationConfig": { 
+        "temperature": 0.3,
+        "maxOutputTokens": 2048
+      }
+    };
+    
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(requestBody),
+      'muteHttpExceptions': true
+    };
+    
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (responseCode !== 200) {
+      Logger.log(`[翻譯] API 錯誤: ${responseCode} - ${responseText}`);
+      return text; // 翻譯失敗時返回原文
+    }
+
+    const jsonResponse = JSON.parse(responseText);
+    if (jsonResponse.error) {
+      Logger.log(`[翻譯] Gemini 錯誤: ${jsonResponse.error.message}`);
+      return text;
+    }
+    
+    if (!jsonResponse.candidates || !jsonResponse.candidates[0].content.parts[0].text) {
+      Logger.log('[翻譯] 回應格式錯誤');
+      return text;
+    }
+    
+    const translatedText = jsonResponse.candidates[0].content.parts[0].text.trim();
+    Logger.log(`[翻譯] 翻譯完成: ${translatedText.substring(0, 100)}...`);
+    
+    return translatedText;
+    
+  } catch (error) {
+    Logger.log(`[翻譯] 翻譯失敗: ${error.toString()}`);
+    return text; // 翻譯失敗時返回原文
+  }
+}
+
+// =================================================================================================
 // 既有函式庫 (為節省篇幅，此處僅列出函式名稱，內容與 V45.5 相同)
 // =================================================================================================
 // =================================================================================================
@@ -1123,6 +1253,28 @@ ${voiceNote ? `用戶補充說明：${voiceNote}` : ''}
 
 ${voiceNote ? '請結合圖片資訊和用戶的語音補充說明，提供完整的交易記錄。' : ''}
 
+【重要】台灣發票識別規則：
+1. **統一發票號碼 (J欄)**：
+   - 格式：2個英文字母 + 8個數字 (如：AB12345678)
+   - 位置：通常在發票右上角或顯眼位置
+   - 注意：電子發票載具號碼不是統一發票號碼
+
+2. **收據編號 (K欄)**：
+   - 一般收據：店家自訂編號 (如：R001, 20250128-001)
+   - 電子發票：載具號碼或交易序號
+   - 信用卡簽單：授權碼或交易編號
+
+3. **買賣方資訊識別**：
+   - **買方 (L欄)**：發票上的「買受人」或「統一編號」欄位的公司名稱
+   - **賣方 (N欄)**：發票上的商家名稱或「賣方」欄位
+   - **買方統編 (M欄)**：8位數字的統一編號 (如：12345678)
+   - **賣方統編**：通常在商家資訊中的8位數統編
+
+4. **發票類型判斷**：
+   - 二聯式：一般消費者使用，通常沒有買方統編
+   - 三聯式：公司行號使用，有完整買賣方資訊
+   - 電子發票：有QR Code，載具號碼
+
 請回傳 JSON 格式，包含以下欄位：
 {
   "date": "完整的交易日期時間 (YYYY-MM-DD HH:MM:SS 格式)",
@@ -1131,7 +1283,31 @@ ${voiceNote ? '請結合圖片資訊和用戶的語音補充說明，提供完�
   "category": "類別 (只能是 食/衣/住/行/育/樂/醫療/保險/其他)",
   "description": "描述",
   "merchant": "商家名稱 (如果能識別)",
-  "note": "備註 (如果有語音補充說明)"
+  "note": "備註 (如果有語音補充說明)",
+  "ocrText": "收據上的完整文字內容 (OCR識別的所有文字，包括商家資訊、地址、電話、商品明細等)",
+  "detectedLanguage": "收據文字的主要語言 (zh-TW, en, ja, fr, de, ko 等)",
+  "invoiceNumber": "統一發票號碼 (2英文+8數字格式，如：AB12345678，沒有則填空字串)",
+  "receiptNumber": "收據編號 (店家收據編號、電子發票載具號碼等，沒有則填空字串)",
+  "buyerName": "買方名稱 (三聯式發票的買受人名稱，沒有則填空字串)",
+  "buyerTaxId": "買方統一編號 (8位數字，沒有則填空字串)",
+  "sellerTaxId": "賣方統一編號 (商家的8位數統編，沒有則填空字串)",
+  "invoiceType": "發票類型 (二聯式/三聯式/電子發票/一般收據)",
+  "merchantInfo": {
+    "name": "商家名稱",
+    "address": "商家地址 (如果有)",
+    "phone": "商家電話 (如果有)",
+    "website": "商家網站 (如果有)",
+    "location": "地點描述 (城市、區域等)",
+    "taxId": "商家統一編號 (8位數字)"
+  },
+  "items": [
+    {
+      "name": "商品名稱",
+      "quantity": "數量",
+      "price": "單價",
+      "total": "小計"
+    }
+  ]
 }
 `;
 
@@ -1359,32 +1535,98 @@ function writeToSheetFromImageEnhanced(data, sheetId, originalFilename, receiptI
       data.description || '圖片識別', // G: ITEM
       '私人', // H: ACCOUNT TYPE
       '', // I: Linked_IOU_EventID
-      '', // J: INVOICE NO.
-      '', // K: REFERENCES NO.
-      '', // L: BUYER NAME
-      '', // M: BUYER TAX ID
-      '', // N: SELLER TAX ID
+      data.invoiceNumber || '', // J: INVOICE NO. (統一發票號碼)
+      data.receiptNumber || '', // K: REFERENCES NO. (收據編號)
+      data.buyerName || '', // L: BUYER NAME (買方名稱)
+      data.buyerTaxId || '', // M: BUYER TAX ID (買方統一編號)
+      data.sellerTaxId || (data.merchantInfo && data.merchantInfo.taxId) || '', // N: SELLER TAX ID (賣方統一編號)
       receiptImageLink || originalFilename || '', // O: RECEIPT IMAGE (增強版超連結)
       '待確認', // P: STATUS
       voiceNote ? '圖片+語音' : '圖片識別', // Q: SOURCE
       data.note || voiceNote || '', // R: NOTES
-      data.description || '圖片識別', // S: Original Text (OCR)
-      '', // T: Translation (AI)
+      data.ocrText || data.description || '圖片識別', // S: Original Text (OCR) - 完整OCR文字
+      '', // T: Translation (AI) - 將在後面異步填入
       JSON.stringify({
         originalFilename: originalFilename,
         enhancedLink: receiptImageLink,
         processTime: new Date(),
         hasVoiceNote: !!voiceNote,
-        category: data.category || '其他'
-      }) // U: META_DATA
+        category: data.category || '其他',
+        detectedLanguage: data.detectedLanguage || 'unknown',
+        merchantInfo: data.merchantInfo || {},
+        items: data.items || [],
+        ocrTextLength: (data.ocrText || '').length,
+        translationStatus: 'pending',
+        // 商務資訊
+        invoiceType: data.invoiceType || 'unknown',
+        invoiceNumber: data.invoiceNumber || '',
+        receiptNumber: data.receiptNumber || '',
+        buyerInfo: {
+          name: data.buyerName || '',
+          taxId: data.buyerTaxId || ''
+        },
+        sellerInfo: {
+          name: data.merchant || '',
+          taxId: data.sellerTaxId || (data.merchantInfo && data.merchantInfo.taxId) || ''
+        },
+        businessData: {
+          hasInvoiceNumber: !!(data.invoiceNumber),
+          hasReceiptNumber: !!(data.receiptNumber),
+          hasBuyerInfo: !!(data.buyerName || data.buyerTaxId),
+          hasSellerTaxId: !!(data.sellerTaxId || (data.merchantInfo && data.merchantInfo.taxId)),
+          isBusinessInvoice: !!(data.buyerTaxId || data.sellerTaxId)
+        }
+      }) // U: META_DATA - 豐富的商務元數據
     ];
 
     // 寫入資料
     sheet.appendRow(rowData);
+    const newRowIndex = sheet.getLastRow();
     
     Logger.log(`成功寫入增強版圖片交易記錄: ${JSON.stringify(data)}`);
     Logger.log(`收據連結: ${receiptImageLink}`);
-    return true;
+    
+    // 異步處理翻譯（如果需要）
+    if (data.ocrText && data.detectedLanguage && data.detectedLanguage !== 'zh-TW' && data.detectedLanguage !== 'zh') {
+      try {
+        Logger.log(`[翻譯] 開始翻譯 OCR 文字，語言: ${data.detectedLanguage}`);
+        const translatedText = translateText(data.ocrText, data.detectedLanguage, 'zh-TW');
+        
+        // 更新 T 欄位（Translation）
+        sheet.getRange(newRowIndex, 20).setValue(translatedText); // T 欄位是第 20 欄
+        
+        // 更新 U 欄位的翻譯狀態
+        const updatedMetaData = JSON.parse(rowData[20]); // U 欄位是第 21 欄（索引 20）
+        updatedMetaData.translationStatus = 'completed';
+        updatedMetaData.translationTime = new Date();
+        sheet.getRange(newRowIndex, 21).setValue(JSON.stringify(updatedMetaData));
+        
+        Logger.log(`[翻譯] 翻譯完成並更新到表格`);
+      } catch (translationError) {
+        Logger.log(`[翻譯] 翻譯失敗: ${translationError.toString()}`);
+        
+        // 更新翻譯狀態為失敗
+        const updatedMetaData = JSON.parse(rowData[20]);
+        updatedMetaData.translationStatus = 'failed';
+        updatedMetaData.translationError = translationError.toString();
+        sheet.getRange(newRowIndex, 21).setValue(JSON.stringify(updatedMetaData));
+      }
+    } else {
+      Logger.log(`[翻譯] 跳過翻譯：語言=${data.detectedLanguage}，已是中文或無OCR文字`);
+      
+      // 更新翻譯狀態為不需要
+      const updatedMetaData = JSON.parse(rowData[20]);
+      updatedMetaData.translationStatus = 'not_needed';
+      sheet.getRange(newRowIndex, 21).setValue(JSON.stringify(updatedMetaData));
+    }
+    
+    return {
+      success: true,
+      data: data,
+      receiptImageLink: receiptImageLink,
+      rowIndex: newRowIndex,
+      translationProcessed: !!(data.ocrText && data.detectedLanguage && data.detectedLanguage !== 'zh-TW')
+    };
     
   }, {
     originalFilename: originalFilename,
