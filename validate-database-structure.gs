@@ -1,350 +1,422 @@
-/**
- * 資料庫結構驗證和修正腳本
- * 根據完整的 21 欄位資料庫結構進行驗證和修正
- */
-
-// 標準資料庫結構定義
-const DATABASE_SCHEMA = {
-  ALL_RECORDS: {
-    SHEET_NAME: 'All Records',
-    COLUMNS: [
-      { name: 'TIMESTAMP', index: 0, type: 'Datetime', description: '交易發生的精確時間' },
-      { name: 'AMOUNT', index: 1, type: 'Number', description: '原始交易金額' },
-      { name: 'CURRENCY', index: 2, type: 'String', description: '原始交易的幣別', validValues: ['TWD', 'JPY', 'USD', 'EUR', 'CNY'] },
-      { name: 'EXCHANGE RATE', index: 3, type: 'Number', description: '相對於 TWD 的匯率' },
-      { name: 'Amount (TWD)', index: 4, type: 'Number', description: '自動換算為新台幣後的金額', formula: true },
-      { name: 'CATEGORY', index: 5, type: 'String', description: '交易分類', validValues: ['食', '衣', '住', '行', '育', '樂', '醫療', '保險', '其他'] },
-      { name: 'ITEM', index: 6, type: 'String', description: '交易項目或商品名稱的詳細描述' },
-      { name: 'ACCOUNT TYPE', index: 7, type: 'String', description: '帳戶類型', validValues: ['私人', '公司'] },
-      { name: 'Linked_IOU_EventID', index: 8, type: 'String', description: '關聯至 Events 表的 EventID' },
-      { name: 'INVOICE NO.', index: 9, type: 'String', description: '發票號碼' },
-      { name: 'REFERENCES NO.', index: 10, type: 'String', description: '其他參考編號' },
-      { name: 'BUYER NAME', index: 11, type: 'String', description: '買方名稱' },
-      { name: 'BUYER TAX ID', index: 12, type: 'String', description: '買方統編' },
-      { name: 'SELLER TAX ID', index: 13, type: 'String', description: '賣方統編' },
-      { name: 'RECEIPT IMAGE', index: 14, type: 'URL', description: '原始單據的照片連結' },
-      { name: 'STATUS', index: 15, type: 'String', description: '紀錄狀態', validValues: ['待確認', '已確認', 'Active'] },
-      { name: 'SOURCE', index: 16, type: 'String', description: '資料來源', validValues: ['OCR', '語音', 'PDF', 'Email CSV', '圖片識別', '語音輸入', '圖片+語音'] },
-      { name: 'NOTES', index: 17, type: 'String', description: '備註' },
-      { name: 'Original Text (OCR)', index: 18, type: 'String', description: '從 OCR 或其他來源獲取的未處理原始文字' },
-      { name: 'Translation (AI)', index: 19, type: 'String', description: 'AI 翻譯或處理後的文字' },
-      { name: 'META_DATA', index: 20, type: 'JSON String', description: '由 AI 解析出的原始 JSON 數據' }
-    ]
-  }
-};
+// =================================================================================================
+// 財政部 CSV 結構深度診斷工具 - 2025-08-04
+// 專門分析財政部電子發票 CSV 的實際格式和內容
+// =================================================================================================
 
 /**
- * 驗證資料庫結構是否正確
+ * 🔬 超詳細 CSV 結構分析
  */
-function validateDatabaseStructure() {
-  Logger.log('=== 開始驗證資料庫結構 ===');
+function ultraDetailedCsvAnalysis() {
+  Logger.log('🔬 開始超詳細 CSV 結構分析...');
   
   try {
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(DATABASE_SCHEMA.ALL_RECORDS.SHEET_NAME);
+    const threads = GmailApp.search('from:einvoice@einvoice.nat.gov.tw subject:彙整', 0, 1);
     
-    if (!sheet) {
-      throw new Error(`找不到工作表: ${DATABASE_SCHEMA.ALL_RECORDS.SHEET_NAME}`);
+    if (threads.length === 0) {
+      Logger.log('❌ 找不到財政部郵件');
+      return null;
     }
     
-    // 檢查標題行
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const expectedHeaders = DATABASE_SCHEMA.ALL_RECORDS.COLUMNS.map(col => col.name);
+    const message = threads[0].getMessages()[0];
+    const attachments = message.getAttachments();
     
-    Logger.log(`目前欄位數量: ${headers.length}`);
-    Logger.log(`期望欄位數量: ${expectedHeaders.length}`);
+    Logger.log(`📧 分析郵件: ${message.getSubject()}`);
+    Logger.log(`📅 日期: ${message.getDate()}`);
+    Logger.log(`📎 附件數量: ${attachments.length}`);
     
-    const issues = [];
-    
-    // 檢查欄位數量
-    if (headers.length !== expectedHeaders.length) {
-      issues.push(`欄位數量不符：目前 ${headers.length} 個，期望 ${expectedHeaders.length} 個`);
-    }
-    
-    // 檢查每個欄位
-    for (let i = 0; i < Math.max(headers.length, expectedHeaders.length); i++) {
-      const currentHeader = headers[i] || '(缺少)';
-      const expectedHeader = expectedHeaders[i] || '(多餘)';
+    for (let attachment of attachments) {
+      const fileName = attachment.getName();
+      Logger.log(`\n📎 附件: ${fileName} (${attachment.getSize()} bytes)`);
       
-      if (currentHeader !== expectedHeader) {
-        issues.push(`第 ${i+1} 欄位不符：目前 "${currentHeader}"，期望 "${expectedHeader}"`);
+      if (fileName.toLowerCase().includes('.csv')) {
+        Logger.log(`\n📊 超詳細分析 CSV: ${fileName}`);
+        
+        // 嘗試多種編碼
+        let csvContent = null;
+        let usedEncoding = null;
+        
+        const encodings = ['UTF-8', 'Big5', 'GBK', 'UTF-16'];
+        for (let encoding of encodings) {
+          try {
+            csvContent = attachment.getDataAsString(encoding);
+            usedEncoding = encoding;
+            Logger.log(`✅ 成功使用 ${encoding} 編碼讀取`);
+            break;
+          } catch (error) {
+            Logger.log(`❌ ${encoding} 編碼失敗`);
+          }
+        }
+        
+        if (!csvContent) {
+          Logger.log('❌ 所有編碼都失敗');
+          continue;
+        }
+        
+        // 分析 CSV 基本結構
+        const lines = csvContent.split('\n');
+        Logger.log(`\n📊 CSV 基本資訊:`);
+        Logger.log(`  - 總行數: ${lines.length}`);
+        Logger.log(`  - 編碼: ${usedEncoding}`);
+        Logger.log(`  - 內容長度: ${csvContent.length} 字元`);
+        
+        // 分析分隔符
+        const firstLine = lines[0] || '';
+        const separators = [',', ';', '\t', '|'];
+        let bestSeparator = ',';
+        let maxColumns = 0;
+        
+        separators.forEach(sep => {
+          const columns = firstLine.split(sep);
+          if (columns.length > maxColumns) {
+            maxColumns = columns.length;
+            bestSeparator = sep;
+          }
+        });
+        
+        Logger.log(`  - 分隔符: "${bestSeparator}" (${maxColumns} 欄位)`);
+        
+        // 詳細分析前 15 行
+        Logger.log(`\n📋 詳細行分析 (前 15 行):`);
+        for (let i = 0; i < Math.min(15, lines.length); i++) {
+          const line = lines[i].trim();
+          if (!line) {
+            Logger.log(`行 ${i + 1}: (空行)`);
+            continue;
+          }
+          
+          Logger.log(`\n行 ${i + 1}:`);
+          Logger.log(`  原始內容: ${line.substring(0, 150)}${line.length > 150 ? '...' : ''}`);
+          
+          const columns = line.split(bestSeparator);
+          Logger.log(`  欄位數: ${columns.length}`);
+          
+          // 分析每個欄位
+          columns.forEach((col, colIndex) => {
+            const cleanCol = col.replace(/["\s]/g, '');
+            const originalCol = col.trim();
+            
+            Logger.log(`    欄位 ${colIndex + 1}: "${originalCol}"`);
+            
+            // 數字分析
+            const numValue = parseFloat(cleanCol);
+            if (!isNaN(numValue) && numValue > 0) {
+              let numType = '';
+              
+              if (numValue < 1) {
+                numType = '小數';
+              } else if (numValue >= 1 && numValue <= 10000) {
+                numType = '可能金額';
+              } else if (numValue > 10000 && numValue <= 1000000) {
+                numType = '大金額或代碼';
+              } else {
+                numType = '超大數字(可能是ID/日期)';
+              }
+              
+              Logger.log(`      -> 數值: ${numValue} (${numType})`);
+            } else if (cleanCol.length > 0) {
+              // 文字分析
+              let textType = '';
+              
+              if (/^\d{4}-\d{2}-\d{2}/.test(cleanCol)) {
+                textType = '日期格式';
+              } else if (/^[A-Z]{2}\d{8}$/.test(cleanCol)) {
+                textType = '發票號碼格式';
+              } else if (/^\d{8}$/.test(cleanCol)) {
+                textType = '統一編號格式';
+              } else if (cleanCol.includes('公司') || cleanCol.includes('有限')) {
+                textType = '公司名稱';
+              } else {
+                textType = '一般文字';
+              }
+              
+              Logger.log(`      -> 文字: "${cleanCol}" (${textType})`);
+            }
+          });
+        }
+        
+        // 嘗試智慧識別欄位類型
+        Logger.log(`\n🧠 智慧欄位識別:`);
+        if (lines.length > 0) {
+          const headers = lines[0].split(bestSeparator);
+          
+          headers.forEach((header, index) => {
+            const cleanHeader = header.replace(/["\s]/g, '');
+            Logger.log(`\n欄位 ${index + 1}: "${cleanHeader}"`);
+            
+            // 分析這個欄位在所有行中的內容
+            let fieldAnalysis = {
+              numbers: [],
+              texts: [],
+              patterns: []
+            };
+            
+            for (let i = 1; i < Math.min(10, lines.length); i++) {
+              const columns = lines[i].split(bestSeparator);
+              if (index < columns.length) {
+                const cellValue = columns[index].replace(/["\s]/g, '');
+                const numValue = parseFloat(cellValue);
+                
+                if (!isNaN(numValue) && numValue > 0) {
+                  fieldAnalysis.numbers.push(numValue);
+                } else if (cellValue.length > 0) {
+                  fieldAnalysis.texts.push(cellValue);
+                }
+              }
+            }
+            
+            // 分析結果
+            if (fieldAnalysis.numbers.length > 0) {
+              const avgNum = fieldAnalysis.numbers.reduce((a, b) => a + b, 0) / fieldAnalysis.numbers.length;
+              const minNum = Math.min(...fieldAnalysis.numbers);
+              const maxNum = Math.max(...fieldAnalysis.numbers);
+              
+              Logger.log(`  數字統計: 平均=${avgNum.toFixed(2)}, 最小=${minNum}, 最大=${maxNum}`);
+              Logger.log(`  樣本數字: ${fieldAnalysis.numbers.slice(0, 5).join(', ')}`);
+              
+              // 判斷是否可能是金額欄位
+              if (avgNum >= 1 && avgNum <= 50000 && maxNum <= 500000) {
+                Logger.log(`  🎯 可能是金額欄位！`);
+              } else if (maxNum > 1000000) {
+                Logger.log(`  ⚠️ 數字過大，可能是ID或代碼`);
+              }
+            }
+            
+            if (fieldAnalysis.texts.length > 0) {
+              Logger.log(`  文字樣本: ${fieldAnalysis.texts.slice(0, 3).join(', ')}`);
+            }
+          });
+        }
+        
+        return {
+          fileName: fileName,
+          encoding: usedEncoding,
+          totalLines: lines.length,
+          separator: bestSeparator,
+          columnCount: maxColumns,
+          sampleLines: lines.slice(0, 5)
+        };
       }
     }
     
-    // 檢查資料驗證
-    if (sheet.getLastRow() > 1) {
-      const dataValidationIssues = validateDataContent(sheet);
-      issues.push(...dataValidationIssues);
-    }
-    
-    // 輸出結果
-    if (issues.length === 0) {
-      Logger.log('✅ 資料庫結構驗證通過');
-      return { valid: true, issues: [] };
-    } else {
-      Logger.log('❌ 發現以下問題:');
-      issues.forEach(issue => Logger.log(`  - ${issue}`));
-      return { valid: false, issues: issues };
-    }
+    return null;
     
   } catch (error) {
-    Logger.log(`❌ 驗證過程發生錯誤: ${error.toString()}`);
-    return { valid: false, issues: [error.toString()] };
+    Logger.log(`❌ 超詳細分析失敗: ${error.toString()}`);
+    return null;
   }
-  
-  Logger.log('=== 資料庫結構驗證完成 ===');
 }
 
 /**
- * 驗證資料內容是否符合規範
+ * 🎯 基於實際結構的金額提取
  */
-function validateDataContent(sheet) {
-  const issues = [];
-  const dataRange = sheet.getDataRange();
-  const values = dataRange.getValues();
-  
-  if (values.length < 2) return issues;
-  
-  // 檢查前 10 行資料（避免處理時間過長）
-  const rowsToCheck = Math.min(10, values.length - 1);
-  
-  for (let i = 1; i <= rowsToCheck; i++) {
-    const row = values[i];
-    
-    // 檢查 CURRENCY 欄位 (index 2)
-    const currency = row[2];
-    if (currency && !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[2].validValues.includes(currency)) {
-      issues.push(`第 ${i+1} 行 CURRENCY 欄位無效: "${currency}"`);
-    }
-    
-    // 檢查 CATEGORY 欄位 (index 5)
-    const category = row[5];
-    if (category && !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[5].validValues.includes(category)) {
-      issues.push(`第 ${i+1} 行 CATEGORY 欄位無效: "${category}"`);
-    }
-    
-    // 檢查 ACCOUNT TYPE 欄位 (index 7)
-    const accountType = row[7];
-    if (accountType && !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[7].validValues.includes(accountType)) {
-      issues.push(`第 ${i+1} 行 ACCOUNT TYPE 欄位無效: "${accountType}"`);
-    }
-  }
-  
-  return issues;
-}
-
-/**
- * 自動修正資料庫結構
- */
-function fixDatabaseStructure() {
-  Logger.log('=== 開始修正資料庫結構 ===');
+function extractAmountBasedOnActualStructure() {
+  Logger.log('🎯 基於實際結構提取金額...');
   
   try {
-    const validation = validateDatabaseStructure();
+    // 先執行結構分析
+    const analysis = ultraDetailedCsvAnalysis();
     
-    if (validation.valid) {
-      Logger.log('✅ 資料庫結構已經正確，無需修正');
-      return;
+    if (!analysis) {
+      Logger.log('❌ 無法分析結構');
+      return null;
     }
     
-    Logger.log('開始修正發現的問題...');
+    // 基於分析結果提取金額
+    const threads = GmailApp.search('from:einvoice@einvoice.nat.gov.tw subject:彙整', 0, 1);
+    const message = threads[0].getMessages()[0];
+    const attachments = message.getAttachments();
     
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(DATABASE_SCHEMA.ALL_RECORDS.SHEET_NAME);
-    
-    // 備份現有資料
-    const existingData = sheet.getDataRange().getValues();
-    Logger.log(`備份了 ${existingData.length} 行資料`);
-    
-    // 重設標題行
-    const correctHeaders = DATABASE_SCHEMA.ALL_RECORDS.COLUMNS.map(col => col.name);
-    sheet.getRange(1, 1, 1, sheet.getLastColumn()).clearContent();
-    sheet.getRange(1, 1, 1, correctHeaders.length).setValues([correctHeaders]);
-    
-    // 設定 E 欄位公式
-    sheet.getRange('E1').setValue('Amount (TWD)');
-    sheet.getRange('E2').setFormula('={"Amount (TWD)"; ARRAYFORMULA(IF(ISBLANK(A2:A),, B2:B * D2:D))}');
-    
-    // 修正現有資料
-    if (existingData.length > 1) {
-      const fixedData = fixDataRows(existingData.slice(1)); // 排除標題行
+    for (let attachment of attachments) {
+      const fileName = attachment.getName();
       
-      if (fixedData.length > 0) {
-        // 寫入修正後的資料
-        sheet.getRange(3, 1, fixedData.length, correctHeaders.length).setValues(fixedData);
-        Logger.log(`修正並寫入了 ${fixedData.length} 行資料`);
+      if (fileName.toLowerCase().includes('.csv')) {
+        let csvContent = attachment.getDataAsString('UTF-8');
+        const lines = csvContent.split('\n');
+        
+        Logger.log(`\n💰 基於實際結構提取金額:`);
+        
+        let totalAmount = 0;
+        let recordCount = 0;
+        let amountDetails = [];
+        
+        // 使用更寬鬆的金額範圍
+        const MIN_REASONABLE = 0.1;    // 最小 0.1 元
+        const MAX_REASONABLE = 500000; // 最大 50 萬元
+        
+        for (let i = 1; i < Math.min(lines.length, 100); i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const columns = line.split(analysis.separator);
+          
+          // 策略：尋找每行中最合理的金額
+          let bestAmount = 0;
+          let bestColumn = -1;
+          
+          for (let col = 0; col < columns.length; col++) {
+            const cellValue = columns[col].replace(/["\s]/g, '');
+            const amount = parseFloat(cellValue);
+            
+            if (!isNaN(amount) && amount >= MIN_REASONABLE && amount <= MAX_REASONABLE) {
+              // 優先選擇有小數點的金額
+              if (cellValue.includes('.') && amount > bestAmount) {
+                bestAmount = amount;
+                bestColumn = col;
+              } else if (!cellValue.includes('.') && amount > bestAmount && bestAmount === 0) {
+                bestAmount = amount;
+                bestColumn = col;
+              }
+            }
+          }
+          
+          if (bestAmount > 0) {
+            totalAmount += bestAmount;
+            recordCount++;
+            amountDetails.push({
+              row: i + 1,
+              column: bestColumn + 1,
+              amount: bestAmount
+            });
+            
+            Logger.log(`行 ${i + 1}, 欄位 ${bestColumn + 1}: ${bestAmount} 元`);
+          }
+        }
+        
+        Logger.log(`\n📊 提取結果:`);
+        Logger.log(`  總金額: ${totalAmount} 元`);
+        Logger.log(`  記錄數: ${recordCount}`);
+        Logger.log(`  平均金額: ${recordCount > 0 ? (totalAmount / recordCount).toFixed(2) : 0} 元`);
+        
+        if (totalAmount > 0 && recordCount > 0) {
+          const avgAmount = totalAmount / recordCount;
+          
+          if (avgAmount >= 1 && avgAmount <= 10000) {
+            Logger.log('✅ 提取的金額看起來合理！');
+            return {
+              totalAmount: totalAmount,
+              recordCount: recordCount,
+              averageAmount: avgAmount,
+              details: amountDetails.slice(0, 10) // 只返回前10個樣本
+            };
+          } else {
+            Logger.log('⚠️ 平均金額可能不太合理，需要人工確認');
+            return {
+              totalAmount: totalAmount,
+              recordCount: recordCount,
+              averageAmount: avgAmount,
+              details: amountDetails.slice(0, 10),
+              warning: '平均金額異常'
+            };
+          }
+        } else {
+          Logger.log('❌ 無法提取到任何合理金額');
+          return null;
+        }
       }
     }
     
-    Logger.log('✅ 資料庫結構修正完成');
-    
-    // 再次驗證
-    const finalValidation = validateDatabaseStructure();
-    if (finalValidation.valid) {
-      Logger.log('✅ 修正後驗證通過');
-    } else {
-      Logger.log('⚠️ 修正後仍有問題:');
-      finalValidation.issues.forEach(issue => Logger.log(`  - ${issue}`));
-    }
+    return null;
     
   } catch (error) {
-    Logger.log(`❌ 修正過程發生錯誤: ${error.toString()}`);
-    throw error;
+    Logger.log(`❌ 基於結構提取失敗: ${error.toString()}`);
+    return null;
   }
-  
-  Logger.log('=== 資料庫結構修正完成 ===');
 }
 
 /**
- * 修正資料行，確保符合 21 欄位結構
+ * 🧪 測試基於實際結構的處理器
  */
-function fixDataRows(dataRows) {
-  const fixedRows = [];
-  const correctColumnCount = DATABASE_SCHEMA.ALL_RECORDS.COLUMNS.length;
-  
-  dataRows.forEach((row, index) => {
-    const fixedRow = new Array(correctColumnCount).fill('');
-    
-    // 複製現有資料到正確位置
-    for (let i = 0; i < Math.min(row.length, correctColumnCount); i++) {
-      fixedRow[i] = row[i];
-    }
-    
-    // 修正特定欄位的值
-    // CURRENCY 欄位 (index 2)
-    if (fixedRow[2] && !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[2].validValues.includes(fixedRow[2])) {
-      Logger.log(`修正第 ${index+2} 行 CURRENCY: "${fixedRow[2]}" -> "TWD"`);
-      fixedRow[2] = 'TWD';
-    }
-    
-    // EXCHANGE RATE 欄位 (index 3)
-    if (fixedRow[2] === 'TWD' && (!fixedRow[3] || fixedRow[3] !== 1)) {
-      fixedRow[3] = 1;
-    }
-    
-    // CATEGORY 欄位 (index 5)
-    if (fixedRow[5] && !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[5].validValues.includes(fixedRow[5])) {
-      const inferredCategory = inferCategoryFromText(fixedRow[6] || fixedRow[18] || '');
-      Logger.log(`修正第 ${index+2} 行 CATEGORY: "${fixedRow[5]}" -> "${inferredCategory}"`);
-      fixedRow[5] = inferredCategory;
-    }
-    
-    // ACCOUNT TYPE 欄位 (index 7)
-    if (!fixedRow[7] || !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[7].validValues.includes(fixedRow[7])) {
-      fixedRow[7] = '私人';
-    }
-    
-    // STATUS 欄位 (index 15)
-    if (!fixedRow[15] || !DATABASE_SCHEMA.ALL_RECORDS.COLUMNS[15].validValues.includes(fixedRow[15])) {
-      fixedRow[15] = '待確認';
-    }
-    
-    fixedRows.push(fixedRow);
-  });
-  
-  return fixedRows;
-}
-
-/**
- * 從文字推斷類別
- */
-function inferCategoryFromText(text) {
-  if (!text) return '其他';
-  
-  const textLower = text.toLowerCase();
-  
-  if (textLower.includes('咖啡') || textLower.includes('餐') || textLower.includes('食') || 
-      textLower.includes('飲料') || textLower.includes('午餐') || textLower.includes('晚餐')) {
-    return '食';
-  } else if (textLower.includes('衣') || textLower.includes('服裝') || textLower.includes('鞋')) {
-    return '衣';
-  } else if (textLower.includes('房') || textLower.includes('住') || textLower.includes('租') || textLower.includes('水電')) {
-    return '住';
-  } else if (textLower.includes('交通') || textLower.includes('車') || textLower.includes('油') || textLower.includes('捷運')) {
-    return '行';
-  } else if (textLower.includes('書') || textLower.includes('學') || textLower.includes('課') || textLower.includes('教育')) {
-    return '育';
-  } else if (textLower.includes('電影') || textLower.includes('遊戲') || textLower.includes('娛樂') || textLower.includes('休閒')) {
-    return '樂';
-  } else if (textLower.includes('醫') || textLower.includes('藥') || textLower.includes('健康') || textLower.includes('診所')) {
-    return '醫療';
-  } else if (textLower.includes('保險')) {
-    return '保險';
-  }
-  
-  return '其他';
-}
-
-/**
- * 生成資料庫結構報告
- */
-function generateDatabaseReport() {
-  Logger.log('=== 生成資料庫結構報告 ===');
+function testStructureBasedProcessor() {
+  Logger.log('🧪 測試基於實際結構的處理器...');
   
   try {
-    const validation = validateDatabaseStructure();
-    const ss = SpreadsheetApp.openById(MAIN_LEDGER_ID);
-    const sheet = ss.getSheetByName(DATABASE_SCHEMA.ALL_RECORDS.SHEET_NAME);
+    const extractResult = extractAmountBasedOnActualStructure();
     
-    Logger.log('\n📊 資料庫結構報告');
-    Logger.log('==================');
-    Logger.log(`工作表名稱: ${DATABASE_SCHEMA.ALL_RECORDS.SHEET_NAME}`);
-    Logger.log(`總行數: ${sheet.getLastRow()}`);
-    Logger.log(`總欄數: ${sheet.getLastColumn()}`);
-    Logger.log(`資料行數: ${sheet.getLastRow() - 1}`);
-    Logger.log(`結構驗證: ${validation.valid ? '✅ 通過' : '❌ 失敗'}`);
-    
-    if (!validation.valid) {
-      Logger.log('\n🚨 發現的問題:');
-      validation.issues.forEach(issue => Logger.log(`  - ${issue}`));
+    if (!extractResult) {
+      Logger.log('❌ 無法提取金額');
+      return null;
     }
     
-    Logger.log('\n📋 標準欄位結構:');
-    DATABASE_SCHEMA.ALL_RECORDS.COLUMNS.forEach((col, index) => {
-      const letter = String.fromCharCode(65 + index);
-      Logger.log(`  ${letter}. ${col.name} (${col.type}) - ${col.description}`);
-    });
+    // 搜尋測試郵件
+    const threads = GmailApp.search('from:einvoice@einvoice.nat.gov.tw subject:彙整', 0, 1);
+    const message = threads[0].getMessages()[0];
     
-    return validation;
+    let result = {
+      date: Utilities.formatDate(message.getDate(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      amount: extractResult.totalAmount,
+      currency: 'TWD',
+      category: '其他',
+      description: `財政部 - 電子發票彙整 (${extractResult.recordCount} 張發票, 平均 ${extractResult.averageAmount.toFixed(0)} 元)`,
+      merchant: '財政部',
+      source: 'Email : 電子收據'
+    };
+    
+    Logger.log(`\n🧪 基於結構的測試結果:`);
+    Logger.log(`  金額: ${result.amount} 元`);
+    Logger.log(`  描述: ${result.description}`);
+    Logger.log(`  發票數量: ${extractResult.recordCount}`);
+    Logger.log(`  平均金額: ${extractResult.averageAmount.toFixed(2)} 元`);
+    
+    // 合理性評估
+    if (extractResult.averageAmount >= 1 && extractResult.averageAmount <= 10000) {
+      Logger.log('🎉 結果看起來非常合理！');
+      Logger.log('✅ 建議使用此結果');
+    } else if (extractResult.averageAmount > 10000) {
+      Logger.log('⚠️ 平均金額偏高，請人工確認');
+    } else {
+      Logger.log('⚠️ 平均金額偏低，可能有問題');
+    }
+    
+    if (extractResult.warning) {
+      Logger.log(`⚠️ 警告: ${extractResult.warning}`);
+    }
+    
+    return result;
     
   } catch (error) {
-    Logger.log(`❌ 生成報告時發生錯誤: ${error.toString()}`);
-    throw error;
+    Logger.log(`❌ 測試失敗: ${error.toString()}`);
+    return null;
   }
-  
-  Logger.log('=== 資料庫結構報告完成 ===');
 }
 
 /**
- * 一鍵完整修正
+ * 📋 生成 CSV 結構報告
  */
-function completeFixAllIssues() {
-  Logger.log('🔧 開始一鍵完整修正...\n');
+function generateCsvStructureReport() {
+  Logger.log('📋 生成 CSV 結構報告...');
   
   try {
-    // 1. 生成初始報告
-    Logger.log('步驟 1: 生成初始報告');
-    generateDatabaseReport();
+    Logger.log('\n=== 財政部 CSV 結構分析報告 ===');
+    Logger.log(`報告時間: ${new Date().toISOString()}`);
     
-    // 2. 修正資料庫結構
-    Logger.log('\n步驟 2: 修正資料庫結構');
-    fixDatabaseStructure();
+    // 1. 超詳細結構分析
+    Logger.log('\n1. 結構分析:');
+    const structureAnalysis = ultraDetailedCsvAnalysis();
     
-    // 3. 生成最終報告
-    Logger.log('\n步驟 3: 生成最終報告');
-    const finalReport = generateDatabaseReport();
+    // 2. 金額提取測試
+    Logger.log('\n2. 金額提取測試:');
+    const extractionTest = testStructureBasedProcessor();
     
-    if (finalReport.valid) {
-      Logger.log('\n🎉 所有問題修正完成！資料庫結構現在完全符合規範。');
+    // 3. 建議
+    Logger.log('\n3. 建議:');
+    if (extractionTest && extractionTest.amount > 0) {
+      Logger.log('✅ 找到可行的金額提取方案');
+      Logger.log('建議: 使用基於實際結構的提取邏輯');
+      Logger.log(`推薦金額: ${extractionTest.amount} 元`);
     } else {
-      Logger.log('\n⚠️ 部分問題仍需手動處理。');
+      Logger.log('❌ 仍無法找到合適的金額提取方案');
+      Logger.log('建議: 需要人工檢查 CSV 格式或聯絡財政部確認格式變更');
     }
     
-    return finalReport;
+    Logger.log('\n=== 報告結束 ===');
+    
+    return {
+      structure: structureAnalysis,
+      extraction: extractionTest
+    };
     
   } catch (error) {
-    Logger.log(`❌ 完整修正過程中發生錯誤: ${error.toString()}`);
-    Logger.log(`錯誤堆疊: ${error.stack}`);
-    throw error;
+    Logger.log(`❌ 報告生成失敗: ${error.toString()}`);
+    return null;
   }
 }
