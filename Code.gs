@@ -1865,6 +1865,46 @@ function processAutomatedEmailsWithWaterBill() {
 }
 
 /**
+ * 🧪 測試圖片記帳 API 修復
+ */
+function testImageProcessingFix() {
+  Logger.log('🧪 === 圖片記帳 API 修復測試開始 ===');
+  
+  try {
+    // 創建一個測試用的小圖片 blob
+    const testImageData = Utilities.base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==');
+    const testBlob = Utilities.newBlob(testImageData, 'image/png', 'test.png');
+    
+    Logger.log('📸 測試圖片 blob 創建成功');
+    Logger.log(`📏 圖片大小: ${testBlob.getBytes().length} bytes`);
+    Logger.log(`📄 MIME 類型: ${testBlob.getContentType()}`);
+    
+    // 測試 callGeminiForVision 函數
+    Logger.log('🔍 開始測試 Gemini Vision API...');
+    const result = callGeminiForVision(testBlob, '這是一個測試圖片');
+    
+    Logger.log('✅ Gemini Vision API 調用成功');
+    Logger.log(`📋 回應結果: ${result}`);
+    
+    // 嘗試解析 JSON 回應
+    const parsedResult = JSON.parse(result);
+    Logger.log(`💰 解析金額: ${parsedResult.amount}`);
+    Logger.log(`📅 解析日期: ${parsedResult.date}`);
+    Logger.log(`🏷️ 解析類別: ${parsedResult.category}`);
+    
+    Logger.log('🎉 圖片記帳 API 修復測試成功！');
+    return true;
+    
+  } catch (error) {
+    Logger.log(`❌ 圖片記帳 API 測試失敗: ${error.toString()}`);
+    Logger.log(`📊 錯誤詳情: ${error.stack || '無堆疊信息'}`);
+    return false;
+  }
+  
+  Logger.log('=== 圖片記帳 API 修復測試結束 ===');
+}
+
+/**
  * 🧪 測試台北自來水帳單解析功能
  */
 function testWaterBillParsing() {
