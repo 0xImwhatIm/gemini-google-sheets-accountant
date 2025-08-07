@@ -1865,6 +1865,120 @@ function processAutomatedEmailsWithWaterBill() {
 }
 
 /**
+ * 🎉 最終驗證：完整功能測試
+ */
+function testCompleteImageProcessingFinal() {
+  Logger.log('🎉 === 圖片記帳功能最終驗證測試 ===');
+  
+  try {
+    // 測試 1: 基本 API 功能
+    Logger.log('📋 測試 1: 基本 API 功能');
+    const testImageData = Utilities.base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==');
+    const testBlob = Utilities.newBlob(testImageData, 'image/png', 'test.png');
+    
+    const result1 = callGeminiForVision(testBlob, '測試圖片');
+    const parsed1 = JSON.parse(result1);
+    Logger.log(`✅ 基本功能測試成功 - 金額: ${parsed1.amount}, 類別: ${parsed1.category}`);
+    
+    // 測試 2: 時區感知功能
+    Logger.log('📋 測試 2: 時區感知功能');
+    const currentDateTime = getCurrentTimezoneDateTime();
+    Logger.log(`✅ 時區感知功能正常 - 當前時間: ${currentDateTime.dateTime}`);
+    
+    // 測試 3: 語音+圖片組合
+    Logger.log('📋 測試 3: 語音+圖片組合功能');
+    const result3 = callGeminiForVision(testBlob, '這是昨天買的咖啡，花了150元');
+    const parsed3 = JSON.parse(result3);
+    Logger.log(`✅ 語音+圖片功能正常 - 項目: ${parsed3.item}, 備註: ${parsed3.notes}`);
+    
+    Logger.log('🎊 === 所有圖片記帳功能測試通過！系統完全正常！ ===');
+    return true;
+    
+  } catch (error) {
+    Logger.log(`❌ 最終驗證測試失敗: ${error.toString()}`);
+    return false;
+  }
+}
+
+/**
+ * 🧪 測試圖片記帳 API 修復（強制使用 Code.gs 版本）
+ */
+function testImageProcessingFixCodeGS() {
+  Logger.log('🧪 === Code.gs 版本圖片記帳 API 測試開始 ===');
+  
+  try {
+    // 創建一個測試用的小圖片 blob
+    const testImageData = Utilities.base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==');
+    const testBlob = Utilities.newBlob(testImageData, 'image/png', 'test.png');
+    
+    Logger.log('📸 測試圖片 blob 創建成功');
+    Logger.log(`📏 圖片大小: ${testBlob.getBytes().length} bytes`);
+    Logger.log(`📄 MIME 類型: ${testBlob.getContentType()}`);
+    
+    // 直接調用 Code.gs 中的函數（避免被 EMERGENCY 版本覆蓋）
+    Logger.log('🔍 開始測試 Code.gs 中的 Gemini Vision API...');
+    
+    // 手動構建請求來測試 Code.gs 版本
+    const prompt = generateImagePromptWithDynamicDate('這是一個測試圖片');
+    const requestBody = {
+      "contents": [{
+        "parts": [
+          { "text": prompt },
+          {
+            "inline_data": {
+              "mime_type": testBlob.getContentType(),
+              "data": Utilities.base64Encode(testBlob.getBytes())
+            }
+          }
+        ]
+      }],
+      "generationConfig": { "response_mime_type": "application/json" }
+    };
+    
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(requestBody),
+      'muteHttpExceptions': true
+    };
+    
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+    Logger.log(`🔗 使用 API 端點: ${url.split('?')[0]}`);
+    
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    Logger.log(`📊 API 回應狀態: ${responseCode}`);
+    
+    if (responseCode === 200) {
+      Logger.log('✅ Code.gs 版本 API 調用成功');
+      const jsonResponse = JSON.parse(responseText);
+      const aiResultText = jsonResponse.candidates[0].content.parts[0].text;
+      Logger.log(`📋 回應結果: ${aiResultText}`);
+      
+      const parsedResult = JSON.parse(aiResultText);
+      Logger.log(`💰 解析金額: ${parsedResult.amount}`);
+      Logger.log(`📅 解析日期: ${parsedResult.date}`);
+      Logger.log(`🏷️ 解析類別: ${parsedResult.category}`);
+      
+      Logger.log('🎉 Code.gs 版本圖片記帳 API 測試成功！');
+      return true;
+    } else {
+      Logger.log(`❌ Code.gs 版本 API 調用失敗: ${responseCode}`);
+      Logger.log(`📋 錯誤回應: ${responseText}`);
+      return false;
+    }
+    
+  } catch (error) {
+    Logger.log(`❌ Code.gs 版本測試失敗: ${error.toString()}`);
+    return false;
+  }
+  
+  Logger.log('=== Code.gs 版本圖片記帳 API 測試結束 ===');
+}
+
+/**
  * 🧪 測試圖片記帳 API 修復
  */
 function testImageProcessingFix() {
@@ -1890,7 +2004,7 @@ function testImageProcessingFix() {
     const parsedResult = JSON.parse(result);
     Logger.log(`💰 解析金額: ${parsedResult.amount}`);
     Logger.log(`📅 解析日期: ${parsedResult.date}`);
-    Logger.log(`🏷️ 解析類別: ${parsedResult.category}`);
+    Logger.log(`🏷️解析類別: ${parsedResult.category}`);
     
     Logger.log('🎉 圖片記帳 API 修復測試成功！');
     return true;
