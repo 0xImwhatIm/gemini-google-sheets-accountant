@@ -1,6 +1,6 @@
-# 智慧記帳 GEM (Gemini AI Accountant) V47.6
+# 智慧記帳 GEM (Gemini AI Accountant) V47.7
 
-[![Version](https://img.shields.io/badge/version-V47.6-blue.svg)](https://github.com/your-repo/releases)
+[![Version](https://img.shields.io/badge/version-V47.7-blue.svg)](https://github.com/your-repo/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Google%20Apps%20Script-yellow.svg)](https://script.google.com)
 [![AI](https://img.shields.io/badge/AI-Gemini%20Vision-purple.svg)](https://ai.google.dev)
@@ -21,14 +21,14 @@ An AI-driven, self-hostable framework for personal life-data automation.
 **[English]**
 This is not a traditional accounting app. It's a powerful backend engine that you deploy in your own Google Account. It's designed to receive unstructured data from various sources (photos, voice, PDFs, emails), process it using Google Gemini AI into structured financial or life records, and save it to your Google Sheet.
 
-### 🆕 V47.6 欄位修正更新 / V47.6 Column Mapping Fix
+### 🆕 V47.7 郵件處理修正更新 / V47.7 Email Processing Fix
 
-* **🔧 欄位對應修正 (Column Mapping Fix):** 修正 V47.5 中 writeToSheet 函數過度簡化導致的欄位對應錯誤
-* **📊 完整資料結構 (Complete Data Structure):** 恢復完整的 20 欄位對應結構，確保資料寫入正確位置
-* **⚙️ 預設值優化 (Default Value Optimization):** 為關鍵欄位提供更合理的預設值（如 '待確認', '私人'）
-* **🚀 功能完整保留 (Complete Feature Retention):** 繼續保留 V47.5 的所有穩定功能和改進
-* **🎯 向後兼容 (Backward Compatibility):** API 接口和配置格式完全兼容，無需修改客戶端
-* **📋 版本標識更新 (Version Identifier Update):** 清晰的 [V47.6-*] 日誌標識便於診斷和追蹤
+* **📧 郵件處理完整實現 (Complete Email Processing Implementation):** 修正 Email 中 CSV 附件導入未自動計算台幣金額的問題
+* **🔧 統一資料處理標準 (Unified Data Processing Standards):** 確保來自 Email CSV 的記錄與語音、圖片記錄使用相同的欄位對應和計算邏輯
+* **💰 自動計算修正 (Automatic Calculation Fix):** 恢復台幣金額 (E欄) 和匯率 (D欄) 的自動計算功能
+* **🚀 功能完整保留 (Complete Feature Retention):** 繼續保留 V47.6 的所有穩定功能，包括完整的欄位對應結構
+* **🎯 向後兼容 (Backward Compatibility):** API 接口和配置格式完全兼容，現有 EmailRules 工作表無需修改
+* **📋 版本標識更新 (Version Identifier Update):** 清晰的 [V47.7-*] 日誌標識便於診斷和追蹤
 
 ### 核心功能 / Core Features
 
@@ -98,12 +98,14 @@ For detailed deployment steps, please refer to our [Deployment Guide (DEPLOYMENT
 - [安全性指南 (Security Guide)](SECURITY_GUIDE.md)
 
 **📋 版本記錄與分析**
-- [V47.6 版本說明 (V47.6 Release Notes)](RELEASE_NOTES_V47.6.md) - 最新版本
+- [V47.7 版本說明 (V47.7 Release Notes)](RELEASE_NOTES_V47.7.md) - 最新版本
+- [V47.6 版本說明 (V47.6 Release Notes)](RELEASE_NOTES_V47.6.md)
 - [V47.5 版本說明 (V47.5 Release Notes)](RELEASE_NOTES_V47.5.md)
 - [V47.5 實施計劃 (V47.5 Implementation Plan)](V47.5_IMPLEMENTATION_PLAN.md)
 - [重構分析報告 (Refactor Analysis V48)](REFACTOR_ANALYSIS_V48.md)
 - [文件清理報告 (Cleanup Report)](CLEANUP_REPORT_2025-09-06.md)
-- [工作日誌 V47.6 (Work Log V47.6)](WORK_LOG_2025-09-06_V47.6_COLUMN_MAPPING_FIX.md) - 最新
+- [工作日誌 V47.7 (Work Log V47.7)](WORK_LOG_2025-09-06_V47.7_EMAIL_PROCESSING_FIX.md) - 最新
+- [工作日誌 V47.6 (Work Log V47.6)](WORK_LOG_2025-09-06_V47.6_COLUMN_MAPPING_FIX.md)
 - [工作日誌 V47.5 (Work Log V47.5)](WORK_LOG_2025-09-06_V47.5_FUNCTION_RENAME_SUCCESS.md)
 
 **🛠️ 輔助工具**

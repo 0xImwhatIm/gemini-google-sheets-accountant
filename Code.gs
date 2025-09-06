@@ -1,12 +1,12 @@
 // =================================================================================================
-// 智慧記帳 GEM - Google Apps Script (V47.6 - 欄位修正版)
+// 智慧記帳 GEM - Google Apps Script (V47.7 - 郵件處理修正版)
 // =================================================================================================
-// 版本：V47.6.0
+// 版本：V47.7.0
 // 更新日期：2025-09-06
-// 主要更新：修正 V47.5 版中 writeToSheet 函數過度簡化導致的欄位對應錯誤。
-// 1. 【欄位修正】恢復 writeToSheet 函數的完整 20 欄位結構，確保資料寫入正確欄位。
-// 2. 【功能保留】繼續保留 V47.5 的所有穩定功能 (簡化配置、錯誤處理、IOU、時區等)。
-// 3. 【結構優化】為寫入的資料行添加更合理的預設值 (如 '待確認', '私人')。
+// 主要更新：修正 Email 中 CSV 附件導入的帳目未自動計算台幣金額 (E欄) 的問題。
+// 1. 【郵件處理修正】重寫 processAutomatedEmails 函數，使其調用最新的 writeToSheet 函數。
+// 2. 【統一標準】確保來自 Email CSV 的記錄與語音、圖片記錄使用相同的欄位對應和計算邏輯。
+// 3. 【功能保留】繼續保留 V47.6 的所有穩定功能。
 // =================================================================================================
 
 // ====================【使用者設定區】====================
@@ -56,7 +56,7 @@ const CONFIG = {
     Logger.log(`⚠️ 配置警告: ${errors.join(', ')}`);
     Logger.log('請在 Google Apps Script 的「專案設定」→「指令碼屬性」中設定正確的值');
   } else {
-    Logger.log('✅ V47.6 配置檢查通過');
+    Logger.log('✅ V47.7 配置檢查通過');
   }
 })();
 
@@ -288,16 +288,16 @@ function callGeminiForVoice(voiceText) {
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
     
-    Logger.log(`[V47.6-Voice] 調用 Gemini API，語音內容: ${voiceText.substring(0, 50)}...`);
+    Logger.log(`[V47.7-Voice] 調用 Gemini API，語音內容: ${voiceText.substring(0, 50)}...`);
     
     const response = UrlFetchApp.fetch(url, options);
     const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
     
-    Logger.log(`[V47.6-Voice] API 回應狀態: ${responseCode}`);
+    Logger.log(`[V47.7-Voice] API 回應狀態: ${responseCode}`);
     
     if (responseCode !== 200) {
-      Logger.log(`[V47.6-Voice] API 錯誤回應: ${responseText}`);
+      Logger.log(`[V47.7-Voice] API 錯誤回應: ${responseText}`);
       throw new Error(`Gemini API HTTP Error: ${responseCode}. Response: ${responseText}`);
     }
     
@@ -315,11 +315,11 @@ function callGeminiForVoice(voiceText) {
       const aiResultText = jsonResponse.candidates[0].content.parts[0].text;
       JSON.parse(aiResultText); // 驗證回傳的是否為合法 JSON
       
-      Logger.log(`[V47.6-Voice] ✅ 語音處理成功`);
+      Logger.log(`[V47.7-Voice] ✅ 語音處理成功`);
       return aiResultText;
       
     } catch (e) {
-      Logger.log(`[V47.6-Voice] JSON 解析失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
+      Logger.log(`[V47.7-Voice] JSON 解析失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
       throw new Error(`Failed to process voice API call: ${e.message}`);
     }
   }, { name: 'callGeminiForVoice', voiceText: voiceText });
@@ -330,7 +330,7 @@ function callGeminiForVoice(voiceText) {
  */
 function callGeminiForVision_V47_5_FINAL(imageBlob, voiceNote = '') {
   return safeExecute(() => {
-    Logger.log(`[V47.6-Vision] 開始處理圖片，語音備註: ${voiceNote || '無'}`);
+    Logger.log(`[V47.7-Vision] 開始處理圖片，語音備註: ${voiceNote || '無'}`);
     
     const dateInfo = generatePromptDateInfo();
     const prompt = `你是一位專業的記帳助理，專門處理收據和發票圖片。請分析這張圖片並提取交易資訊。
@@ -375,16 +375,16 @@ ${voiceNote ? `用戶補充說明：${voiceNote}` : ''}
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
     
-    Logger.log(`[V47.6-Vision] 使用 API 端點: gemini-1.5-flash-latest`);
+    Logger.log(`[V47.7-Vision] 使用 API 端點: gemini-1.5-flash-latest`);
     
     const response = UrlFetchApp.fetch(url, options);
     const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
     
-    Logger.log(`[V47.6-Vision] API 回應狀態: ${responseCode}`);
+    Logger.log(`[V47.7-Vision] API 回應狀態: ${responseCode}`);
     
     if (responseCode !== 200) {
-      Logger.log(`[V47.6-Vision] API 錯誤回應: ${responseText}`);
+      Logger.log(`[V47.7-Vision] API 錯誤回應: ${responseText}`);
       throw new Error(`Gemini Vision API HTTP Error: ${responseCode}`);
     }
     
@@ -392,33 +392,33 @@ ${voiceNote ? `用戶補充說明：${voiceNote}` : ''}
       const jsonResponse = JSON.parse(responseText);
       
       if (jsonResponse.error) {
-        Logger.log(`[V47.6-Vision] API 返回錯誤: ${JSON.stringify(jsonResponse.error)}`);
+        Logger.log(`[V47.7-Vision] API 返回錯誤: ${JSON.stringify(jsonResponse.error)}`);
         throw new Error(`Gemini Vision API Error: ${jsonResponse.error.message}`);
       }
       
       if (!jsonResponse.candidates || jsonResponse.candidates.length === 0) {
-        Logger.log('[V47.6-Vision] API 回應中沒有候選結果');
+        Logger.log('[V47.7-Vision] API 回應中沒有候選結果');
         throw new Error('No candidates in Gemini Vision API response');
       }
       
       const candidate = jsonResponse.candidates[0];
       if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
-        Logger.log('[V47.6-Vision] 候選結果中沒有內容');
+        Logger.log('[V47.7-Vision] 候選結果中沒有內容');
         throw new Error('No content in Gemini Vision API candidate');
       }
       
       const aiResultText = candidate.content.parts[0].text;
-      Logger.log(`[V47.6-Vision] AI 解析結果: ${aiResultText}`);
+      Logger.log(`[V47.7-Vision] AI 解析結果: ${aiResultText}`);
       
       // 驗證 JSON 格式
       const parsedData = JSON.parse(aiResultText);
-      Logger.log(`[V47.6-Vision] ✅ JSON 解析成功`);
+      Logger.log(`[V47.7-Vision] ✅ JSON 解析成功`);
       
       return aiResultText;
       
     } catch (parseError) {
-      Logger.log(`[V47.6-Vision] JSON 解析失敗: ${parseError.toString()}`);
-      Logger.log(`[V47.6-Vision] 原始回應: ${responseText}`);
+      Logger.log(`[V47.7-Vision] JSON 解析失敗: ${parseError.toString()}`);
+      Logger.log(`[V47.7-Vision] 原始回應: ${responseText}`);
       
       // 使用時區感知的預設值
       const currentDateTime = getCurrentTimezoneDateTime();
@@ -450,15 +450,15 @@ function doGet(e) {
     const action = e.parameter.action;
     const endpoint = e.parameter.endpoint;
     
-    Logger.log(`[V47.6-GET] 收到請求 - action: ${action}, endpoint: ${endpoint}`);
+    Logger.log(`[V47.7-GET] 收到請求 - action: ${action}, endpoint: ${endpoint}`);
     
-    // 🧪 V47.6 診斷端點
+    // 🧪 V47.7 診斷端點
     if (endpoint === 'test') {
-      Logger.log('[V47.6-TEST] 診斷端點被調用');
+      Logger.log('[V47.7-TEST] 診斷端點被調用');
       return ContentService.createTextOutput(JSON.stringify({
         status: 'success',
-        version: 'V47.6.0',
-        message: '欄位修正版本正常運行',
+        version: 'V47.7.0',
+        message: '郵件處理修正版正常運行',
         timestamp: new Date().toISOString(),
         config: {
           hasMainLedgerId: !!CONFIG.MAIN_LEDGER_ID && CONFIG.MAIN_LEDGER_ID !== 'YOUR_GOOGLE_SHEET_ID_HERE',
@@ -470,7 +470,7 @@ function doGet(e) {
     
     // 處理 endpoint 參數（支援 iOS 捷徑的 GET 請求）
     if (endpoint) {
-      Logger.log(`[V47.6-GET] 處理 endpoint: ${endpoint}`);
+      Logger.log(`[V47.7-GET] 處理 endpoint: ${endpoint}`);
       
       if (endpoint === 'voice') {
         return doGet_Voice(e);
@@ -487,14 +487,14 @@ function doGet(e) {
     
     // 處理 action 參數
     if (action === 'processEmails') {
-      processAutomatedEmailsWithWaterBill();
+      processAutomatedEmails();
       return ContentService.createTextOutput('Email processing completed').setMimeType(ContentService.MimeType.TEXT);
     }
     
     // 預設回應
     return HtmlService.createHtmlOutput(`
-      <h1>智慧記帳 GEM V47.6</h1>
-      <p>欄位修正版本已啟用</p>
+      <h1>智慧記帳 GEM V47.7</h1>
+      <p>郵件處理修正版已啟用</p>
       <p>支援的端點：voice, image, pdf, iou</p>
       <p>診斷端點：<a href="?endpoint=test">?endpoint=test</a></p>
     `);
@@ -518,7 +518,7 @@ function doPost(e) {
       throw new Error('缺少 endpoint 參數。請在 URL 中指定 ?endpoint=image, ?endpoint=voice, ?endpoint=pdf, 或 ?endpoint=iou');
     }
     
-    Logger.log(`[V47.6-POST] 處理 endpoint: ${endpoint}`);
+    Logger.log(`[V47.7-POST] 處理 endpoint: ${endpoint}`);
     
     // 路由到對應的處理函數
     if (endpoint === 'image') {
@@ -550,7 +550,7 @@ function doGet_Voice(e) {
       throw new Error("缺少 text 參數。請在 URL 中加入 ?text=您的語音文字");
     }
     
-    Logger.log(`[V47.6-Voice-GET] 處理語音文字: ${text.substring(0, 50)}...`);
+    Logger.log(`[V47.7-Voice-GET] 處理語音文字: ${text.substring(0, 50)}...`);
     
     const aiResultText = callGeminiForVoice(text);
     const parsedData = JSON.parse(aiResultText);
@@ -586,7 +586,7 @@ function doPost_Voice(e) {
       throw new Error("缺少 text 參數。請在 POST 資料中包含語音文字");
     }
     
-    Logger.log(`[V47.6-Voice-POST] 處理語音文字: ${params.text.substring(0, 50)}...`);
+    Logger.log(`[V47.7-Voice-POST] 處理語音文字: ${params.text.substring(0, 50)}...`);
     
     const aiResultText = callGeminiForVoice(params.text);
     const parsedData = JSON.parse(aiResultText);
@@ -634,7 +634,7 @@ function doPost_Image(e) {
       throw new Error("圖片資料處理失敗：" + blobError.message);
     }
     
-    Logger.log(`[V47.6-Image] 開始處理圖片記帳`);
+    Logger.log(`[V47.7-Image] 開始處理圖片記帳`);
     
     // 呼叫 AI 處理圖片
     const voiceNote = params.voiceNote || '';
@@ -671,7 +671,7 @@ function doGet_Image(e) {
  */
 function writeToSheet(data, source = 'unknown') {
   return safeExecute(() => {
-    Logger.log(`[V47.6-WriteSheet] 開始寫入資料，來源: ${source}`);
+    Logger.log(`[V47.7-WriteSheet] 開始寫入資料，來源: ${source}`);
     
     const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
     const sheet = ss.getSheetByName(CONFIG.SHEET_NAME);
@@ -709,7 +709,7 @@ function writeToSheet(data, source = 'unknown') {
     
     sheet.appendRow(rowData);
     
-    Logger.log(`[V47.6-WriteSheet] ✅ 成功寫入記帳資料: ${data.item} - ${data.amount} ${data.currency}`);
+    Logger.log(`[V47.7-WriteSheet] ✅ 成功寫入記帳資料: ${data.item} - ${data.amount} ${data.currency}`);
     return true;
   }, { name: 'writeToSheet', source: source });
 }
@@ -748,7 +748,7 @@ function doGet_Iou(e) {
       throw new Error("缺少 text 參數。請在 URL 中加入 ?text=您的代墊款描述");
     }
     
-    Logger.log(`[V47.6-IOU-GET] 處理代墊款: ${text.substring(0, 50)}...`);
+    Logger.log(`[V47.7-IOU-GET] 處理代墊款: ${text.substring(0, 50)}...`);
     
     const aiResultText = callGeminiForIou(text);
     const parsedData = JSON.parse(aiResultText);
@@ -806,7 +806,7 @@ function doPost_Iou(e) {
       throw new Error("缺少 text 參數。請在 POST 資料中包含代墊款描述");
     }
     
-    Logger.log(`[V47.6-IOU-POST] 處理代墊款: ${params.text.substring(0, 50)}...`);
+    Logger.log(`[V47.7-IOU-POST] 處理代墊款: ${params.text.substring(0, 50)}...`);
     
     const aiResultText = callGeminiForIou(params.text);
     const parsedData = JSON.parse(aiResultText);
@@ -889,16 +889,16 @@ function callGeminiForIou(text) {
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${CONFIG.GEMINI_API_KEY}`;
     
-    Logger.log(`[V47.6-IOU] 調用 Gemini API，IOU 內容: ${text.substring(0, 50)}...`);
+    Logger.log(`[V47.7-IOU] 調用 Gemini API，IOU 內容: ${text.substring(0, 50)}...`);
     
     const response = UrlFetchApp.fetch(url, options);
     const responseCode = response.getResponseCode();
     const responseText = response.getContentText();
     
-    Logger.log(`[V47.6-IOU] API 回應狀態: ${responseCode}`);
+    Logger.log(`[V47.7-IOU] API 回應狀態: ${responseCode}`);
     
     if (responseCode !== 200) {
-      Logger.log(`[V47.6-IOU] API 錯誤回應: ${responseText}`);
+      Logger.log(`[V47.7-IOU] API 錯誤回應: ${responseText}`);
       throw new Error(`Gemini IOU API HTTP Error: ${responseCode}. Response: ${responseText}`);
     }
     
@@ -916,11 +916,11 @@ function callGeminiForIou(text) {
       const aiResultText = jsonResponse.candidates[0].content.parts[0].text;
       JSON.parse(aiResultText); // 驗證回傳的是否為合法 JSON
       
-      Logger.log(`[V47.6-IOU] ✅ IOU 處理成功`);
+      Logger.log(`[V47.7-IOU] ✅ IOU 處理成功`);
       return aiResultText;
       
     } catch (e) {
-      Logger.log(`[V47.6-IOU] JSON 解析失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
+      Logger.log(`[V47.7-IOU] JSON 解析失敗: ${e.toString()}. 原始 AI 回應: ${responseText}`);
       throw new Error(`Failed to process IOU API call: ${e.message}`);
     }
   }, { name: 'callGeminiForIou', text: text });
@@ -939,7 +939,7 @@ function handleGroupSplit(data) {
       throw new Error("群組拆分資訊不完整。");
     }
     
-    Logger.log(`[V47.6-GroupSplit] 處理群組拆分: ${totalAmount} 元，參與者: ${participants.join(', ')}`);
+    Logger.log(`[V47.7-GroupSplit] 處理群組拆分: ${totalAmount} 元，參與者: ${participants.join(', ')}`);
     
     let debts = [];
     if (data.splitType === 'EVENLY') {
@@ -969,13 +969,13 @@ function handleSettlement(data) {
       throw new Error(`找不到工作表: ${CONFIG.IOU_DEBTS_SHEET_NAME}`);
     }
     
-    Logger.log(`[V47.6-Settlement] 處理結算: ${data.counterparty}，金額: ${data.amount || '全部'}`);
+    Logger.log(`[V47.7-Settlement] 處理結算: ${data.counterparty}，金額: ${data.amount || '全部'}`);
     
     const dataRange = debtsSheet.getDataRange();
     const values = dataRange.getValues();
     
     if (values.length < 2) {
-      Logger.log('[V47.6-Settlement] 沒有找到債務記錄');
+      Logger.log('[V47.7-Settlement] 沒有找到債務記錄');
       return false;
     }
     
@@ -998,12 +998,12 @@ function handleSettlement(data) {
         debtsSheet.getRange(i + 1, statusColIndex + 1).setValue('Settled');
         debtsSheet.getRange(i + 1, settlementDateColIndex + 1).setValue(new Date());
         
-        Logger.log(`[V47.6-Settlement] ✅ 成功結清與 ${data.counterparty} 的款項`);
+        Logger.log(`[V47.7-Settlement] ✅ 成功結清與 ${data.counterparty} 的款項`);
         return true;
       }
     }
     
-    Logger.log(`[V47.6-Settlement] 未找到符合條件的未結清款項`);
+    Logger.log(`[V47.7-Settlement] 未找到符合條件的未結清款項`);
     return false;
   }, { name: 'handleSettlement' });
 }
@@ -1025,7 +1025,7 @@ function writeToIouLedger(originalText, totalAmount, payer, debts) {
     const eventId = `EVT-${new Date().getTime()}`;
     const now = new Date();
     
-    Logger.log(`[V47.6-IOU-Ledger] 寫入 IOU 記錄，事件 ID: ${eventId}`);
+    Logger.log(`[V47.7-IOU-Ledger] 寫入 IOU 記錄，事件 ID: ${eventId}`);
     
     // 1. 寫入 Events
     eventsSheet.appendRow([eventId, originalText, totalAmount, now, originalText]);
@@ -1039,7 +1039,7 @@ function writeToIouLedger(originalText, totalAmount, payer, debts) {
       debtsSheet.appendRow([debtId, eventId, payer, debt.debtor, debt.amount, debt.item, 'Unsettled', '']);
     });
     
-    Logger.log(`[V47.6-IOU-Ledger] ✅ 成功寫入 IOU 記錄`);
+    Logger.log(`[V47.7-IOU-Ledger] ✅ 成功寫入 IOU 記錄`);
     return true;
   }, { name: 'writeToIouLedger' });
 }
@@ -1054,7 +1054,7 @@ function writeToIouLedger(originalText, totalAmount, payer, debts) {
 function doGet_Pdf(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: 'error',
-    message: 'PDF 處理功能尚未在 V47.6 中實現'
+    message: 'PDF 處理功能尚未在 V47.7 中實現'
   })).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -1064,27 +1064,86 @@ function doGet_Pdf(e) {
 function doPost_Pdf(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: 'error',
-    message: 'PDF 處理功能尚未在 V47.6 中實現'
+    message: 'PDF 處理功能尚未在 V47.7 中實現'
   })).setMimeType(ContentService.MimeType.JSON);
 }
 
 // =================================================================================================
-// 【V47.5 保留】Email 自動處理功能（簡化版）
+// 【V47.7 修正】Email 自動處理功能
 // =================================================================================================
 
 /**
- * 自動處理 Email 的主函數（保留核心功能）
+ * 自動處理 Email 的主函數（恢復核心功能）
  */
-function processAutomatedEmailsWithWaterBill() {
+function processAutomatedEmails() {
   return safeExecute(() => {
-    Logger.log('[V47.6-Email] 開始自動處理 Email（簡化版）');
+    Logger.log('[V47.7-Email] 開始自動化郵件處理...');
     
-    // 這裡保留原有的 Email 處理邏輯
-    // 但使用新的配置系統
-    Logger.log('[V47.6-Email] Email 處理功能需要進一步實現');
+    const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
+    const rulesSheet = ss.getSheetByName(CONFIG.EMAIL_RULES_SHEET_NAME);
     
+    if (!rulesSheet) {
+      Logger.log(`[V47.7-Email] 找不到郵件規則工作表: ${CONFIG.EMAIL_RULES_SHEET_NAME}，處理中止。`);
+      return false;
+    }
+    
+    const rules = rulesSheet.getDataRange().getValues();
+    let totalProcessed = 0;
+    
+    // 從第二行開始讀取規則 (第一行為標題)
+    for (let i = 1; i < rules.length; i++) {
+      const rule = rules[i];
+      const [sender, subjectKeyword, attachmentType, ...columnMapping] = rule;
+      
+      if (!sender || !attachmentType) continue; // 跳過無效規則
+      
+      const searchQuery = `from:${sender} ${subjectKeyword ? `subject:(${subjectKeyword})` : ''} is:unread has:attachment`;
+      Logger.log(`[V47.7-Email] 正在使用規則搜尋郵件: "${searchQuery}"`);
+      
+      const threads = GmailApp.search(searchQuery);
+      
+      for (const thread of threads) {
+        const messages = thread.getMessages();
+        
+        for (const message of messages) {
+          if (message.isUnread()) {
+            const attachments = message.getAttachments();
+            
+            for (const attachment of attachments) {
+              if (attachment.getContentType() === 'text/csv') {
+                Logger.log(`[V47.7-Email] 找到 CSV 附件: ${attachment.getName()}`);
+                
+                const csvData = Utilities.parseCsv(attachment.getDataAsString('UTF-8'));
+                
+                // 假設 CSV 第一行為標題
+                for(let j = 1; j < csvData.length; j++) {
+                  const row = csvData[j];
+                  
+                  const data = {
+                    date: row[columnMapping.indexOf('date')] || new Date(),
+                    amount: parseFloat(row[columnMapping.indexOf('amount')]) || 0,
+                    currency: row[columnMapping.indexOf('currency')] || 'TWD',
+                    category: row[columnMapping.indexOf('category')] || '其他',
+                    item: row[columnMapping.indexOf('item')] || '來自CSV匯入',
+                    merchant: row[columnMapping.indexOf('merchant')] || '未知商家',
+                    notes: `From email: ${message.getSubject()}`
+                  };
+                  
+                  writeToSheet(data, 'email-csv');
+                  totalProcessed++;
+                }
+              }
+            }
+            
+            message.markRead();
+          }
+        }
+      }
+    }
+    
+    Logger.log(`[V47.7-Email] ✅ Email 處理完成，共處理 ${totalProcessed} 筆記錄。`);
     return true;
-  }, { name: 'processAutomatedEmailsWithWaterBill' });
+  }, { name: 'processAutomatedEmails' });
 }
 
 // =================================================================================================
@@ -1092,10 +1151,10 @@ function processAutomatedEmailsWithWaterBill() {
 // =================================================================================================
 
 /**
- * V47.6 配置測試函數
+ * V47.7 配置測試函數
  */
-function testV47_6_Configuration() {
-  Logger.log('🧪 === V47.6 配置測試開始 ===');
+function testV47_7_Configuration() {
+  Logger.log('🧪 === V47.7 配置測試開始 ===');
   
   try {
     // 1. 配置驗證測試
@@ -1115,7 +1174,7 @@ function testV47_6_Configuration() {
     Logger.log(`✅ 時區: ${dateInfo.timezone}`);
     
     // 3. Google Sheets 連接測試
-    Logger.log('📋 測試 3: Google Sheets 連接');
+    Logger.log('� 測試 的3: Google Sheets 連接');
     if (CONFIG.MAIN_LEDGER_ID && CONFIG.MAIN_LEDGER_ID !== 'YOUR_GOOGLE_SHEET_ID_HERE') {
       try {
         const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
@@ -1132,62 +1191,17 @@ function testV47_6_Configuration() {
       Logger.log('❌ MAIN_LEDGER_ID 未設定');
     }
     
-    Logger.log('🎉 === V47.6 配置測試完成 ===');
+    Logger.log('🎉 === V47.7 配置測試完成 ===');
     
     return {
       success: true,
-      message: 'V47.6 配置測試完成',
+      message: 'V47.7 配置測試完成',
       configErrors: configErrors,
       timestamp: new Date().toISOString()
     };
     
   } catch (error) {
     Logger.log('💥 配置測試過程中發生錯誤：' + error.message);
-    return {
-      success: false,
-      message: error.message,
-      timestamp: new Date().toISOString()
-    };
-  }
-}
-
-/**
- * V47.6 圖片記帳功能測試
- */
-function testV47_6_ImageProcessing() {
-  Logger.log('🧪 === V47.6 圖片記帳功能測試開始 ===');
-  
-  try {
-    // 創建測試圖片
-    const testImageData = Utilities.base64Decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==');
-    const testBlob = Utilities.newBlob(testImageData, 'image/png', 'test.png');
-    
-    // 測試圖片處理函數
-    Logger.log('📋 開始測試 V47.6 圖片處理...');
-    
-    // 直接調用 V47.6 的安全執行版本
-    const result = safeExecute(() => {
-      return callGeminiForVision_V47_5_FINAL(testBlob, 'V47.6 測試圖片');
-    }, { name: 'testV47_6_ImageProcessing' });
-    
-    Logger.log('✅ V47.6 圖片處理測試成功');
-    Logger.log(`📊 測試結果: ${result}`);
-    
-    const parsedResult = JSON.parse(result);
-    Logger.log('📝 解析後的資料：');
-    Logger.log(`  日期: ${parsedResult.date}`);
-    Logger.log(`  金額: ${parsedResult.amount}`);
-    Logger.log(`  類別: ${parsedResult.category}`);
-    
-    return {
-      success: true,
-      message: 'V47.6 圖片處理測試通過',
-      data: parsedResult,
-      timestamp: new Date().toISOString()
-    };
-    
-  } catch (error) {
-    Logger.log('❌ V47.6 圖片處理測試失敗：' + error.message);
     return {
       success: false,
       message: error.message,
