@@ -1,6 +1,6 @@
-# 智慧記帳 GEM (Gemini AI Accountant) V47.5
+# 智慧記帳 GEM (Gemini AI Accountant) V47.6
 
-[![Version](https://img.shields.io/badge/version-V47.5-blue.svg)](https://github.com/your-repo/releases)
+[![Version](https://img.shields.io/badge/version-V47.6-blue.svg)](https://github.com/your-repo/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Google%20Apps%20Script-yellow.svg)](https://script.google.com)
 [![AI](https://img.shields.io/badge/AI-Gemini%20Vision-purple.svg)](https://ai.google.dev)
@@ -21,14 +21,14 @@ An AI-driven, self-hostable framework for personal life-data automation.
 **[English]**
 This is not a traditional accounting app. It's a powerful backend engine that you deploy in your own Google Account. It's designed to receive unstructured data from various sources (photos, voice, PDFs, emails), process it using Google Gemini AI into structured financial or life records, and save it to your Google Sheet.
 
-### 🆕 V47.5 重大更新亮點 / V47.5 Major Updates
+### 🆕 V47.6 欄位修正更新 / V47.6 Column Mapping Fix
 
-* **🔧 漸進式重構成功 (Progressive Refactoring Success):** 完全解決 iOS 捷徑拍照記帳 404 錯誤，系統穩定性大幅提升
-* **⚙️ 配置系統統一 (Unified Configuration System):** 從 3 套複雜配置系統簡化為統一的 CONFIG 物件，維護更簡單
-* **🚀 錯誤處理簡化 (Simplified Error Handling):** 移除複雜的 Phase4 框架，採用輕量級 safeExecute 函數
-* **🎯 函數衝突解決 (Function Conflict Resolution):** 創新的函數重命名策略，徹底解決多文件函數覆蓋問題
-* **📊 診斷能力增強 (Enhanced Diagnostics):** 清晰的 [V47.5-*] 日誌標識，問題診斷效率顯著提升
-* **🧹 項目結構優化 (Project Structure Optimization):** 清理 20+ 過時文件，保持清晰的代碼結構
+* **🔧 欄位對應修正 (Column Mapping Fix):** 修正 V47.5 中 writeToSheet 函數過度簡化導致的欄位對應錯誤
+* **📊 完整資料結構 (Complete Data Structure):** 恢復完整的 20 欄位對應結構，確保資料寫入正確位置
+* **⚙️ 預設值優化 (Default Value Optimization):** 為關鍵欄位提供更合理的預設值（如 '待確認', '私人'）
+* **🚀 功能完整保留 (Complete Feature Retention):** 繼續保留 V47.5 的所有穩定功能和改進
+* **🎯 向後兼容 (Backward Compatibility):** API 接口和配置格式完全兼容，無需修改客戶端
+* **📋 版本標識更新 (Version Identifier Update):** 清晰的 [V47.6-*] 日誌標識便於診斷和追蹤
 
 ### 核心功能 / Core Features
 
@@ -98,11 +98,13 @@ For detailed deployment steps, please refer to our [Deployment Guide (DEPLOYMENT
 - [安全性指南 (Security Guide)](SECURITY_GUIDE.md)
 
 **📋 版本記錄與分析**
+- [V47.6 版本說明 (V47.6 Release Notes)](RELEASE_NOTES_V47.6.md) - 最新版本
 - [V47.5 版本說明 (V47.5 Release Notes)](RELEASE_NOTES_V47.5.md)
 - [V47.5 實施計劃 (V47.5 Implementation Plan)](V47.5_IMPLEMENTATION_PLAN.md)
 - [重構分析報告 (Refactor Analysis V48)](REFACTOR_ANALYSIS_V48.md)
 - [文件清理報告 (Cleanup Report)](CLEANUP_REPORT_2025-09-06.md)
-- [工作日誌 (Work Log)](WORK_LOG_2025-09-06_V47.5_FUNCTION_RENAME_SUCCESS.md)
+- [工作日誌 V47.6 (Work Log V47.6)](WORK_LOG_2025-09-06_V47.6_COLUMN_MAPPING_FIX.md) - 最新
+- [工作日誌 V47.5 (Work Log V47.5)](WORK_LOG_2025-09-06_V47.5_FUNCTION_RENAME_SUCCESS.md)
 
 **🛠️ 輔助工具**
 - [環境變數範本 (.env.example)](.env.example)
