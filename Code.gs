@@ -6,8 +6,9 @@
 // 主要更新：整合財政部電子發票診斷功能，提供一個包含所有模組與修正的最終完整版本。
 // 1. 【功能完整性】補全所有被省略的函式，包含 IOU、PDF、測試、端點處理等。
 // 2. 【CSV 修正整合】完整實作財政部 CSV 的特殊處理邏輯 (MOF_CSV)。
-// 3. 【版本校準】統一程式碼內所有版本號為 V49.4.2。
+// 3. 【語法修正完成】修正所有語法錯誤和格式問題，確保代碼品質。
 // 4. 【診斷增強】新增 CSV 格式診斷和強化郵件搜尋功能。
+// 5. 【版本校準】統一程式碼內所有版本號為 V49.4.2。
 // =================================================================================================
 
 // ====================【使用者設定區】====================
@@ -523,8 +524,9 @@ function callGeminiForPdf(pdfBlob, emailSubject) {
       throw new Error(`Failed to parse PDF AI response: ${e.message}`);
     }
   }, { name: 'callGeminiForPdf' });
-}// =
-================================================================================================
+}
+
+// =================================================================================================
 // 各端點處理函數
 // =================================================================================================
 function doGet_Voice(e) {
@@ -1322,10 +1324,12 @@ function getVersionInfo() {
       '語音記帳',
       '圖片OCR記帳',
       '郵件自動處理 (CSV/HTML/PDF)',
+      '財政部電子發票自動處理',
       'IOU代墊款分帳',
       '圖片存檔連結',
       '時區感知處理',
-      '多幣別支援'
+      '多幣別支援',
+      '語法錯誤修正完成'
     ],
     endpoints: [
       '/exec?endpoint=voice',
@@ -2660,7 +2664,7 @@ function markMOFEmailUnreadAndTest() {
     let foundMessage = null;
     
     for (const query of searchQueries) {
-      Logger.log(`� 搜尋: ${"query}`);
+      Logger.log(`� 搜尋: ${query}`);
       const threads = GmailApp.search(query, 0, 3);
       Logger.log(`📧 找到 ${threads.length} 個郵件`);
       
@@ -2941,8 +2945,8 @@ function quickFixMOFInvoice() {
     Logger.log('\n⚠️ 部分功能需要檢查，但 CSV 處理邏輯已完全正常');
   }
 }
-//
- 修正版本的手動標記郵件為未讀並測試函數
+
+// 修正版本的手動標記郵件為未讀並測試函數
 function markMOFEmailUnreadAndTestFixed() {
   Logger.log('🔄 === 手動標記財政部郵件為未讀並測試 (修正版) ===');
   
@@ -3013,8 +3017,9 @@ function markMOFEmailUnreadAndTestFixed() {
     Logger.log(`❌ 測試失敗: ${error.message}`);
     return false;
   }
-}//
- 修正版本 - 手動標記郵件為未讀並測試 (替代原有問題函數)
+}
+
+// 修正版本 - 手動標記郵件為未讀並測試 (替代原有問題函數)
 function markMOFEmailUnreadAndTestCorrected() {
   Logger.log('🔄 === 手動標記財政部郵件為未讀並測試 (修正版) ===');
   
