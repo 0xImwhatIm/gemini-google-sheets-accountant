@@ -3211,4 +3211,118 @@ function safeProcessAutomatedEmails() {
     
     return false;
   }
+}// 修復財政部
+電子發票郵件規則
+function fixMOFEmailRule() {
+  Logger.log('🔧 === 修復財政部電子發票郵件規則 ===');
+  
+  try {
+    const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
+    let rulesSheet = ss.getSheetByName(CONFIG.EMAIL_RULES_SHEET_NAME);
+    
+    if (!rulesSheet) {
+      Logger.log('❌ EmailRules 工作表不存在');
+      return false;
+    }
+    
+    const rules = rulesSheet.getDataRange().getValues();
+    Logger.log(`📋 檢查 ${rules.length - 1} 條現有規則`);
+    
+    // 檢查並更新現有的財政部規則
+    let ruleUpdated = false;
+    for (let i = 1; i < rules.length; i++) {
+      const rule = rules[i];
+      if (rule[0] && rule[0].includes('einvoice.nat.gov.tw')) {
+        Logger.log(`📧 找到現有財政部規則: ${rule[0]}`);
+        
+        // 更新為正確的寄件者地址
+        rulesSheet.getRange(i + 1, 1).setValue('einvoice@einvoice.nat.gov.tw');
+        rulesSheet.getRange(i + 1, 2).setValue('消費發票彙整通知');
+        rulesSheet.getRange(i + 1, 3).setValue('MOF_CSV');
+        rulesSheet.getRange(i + 1, 4).setValue('財政部電子發票 CSV 處理 - V49.4.2 修正版');
+        
+        Logger.log('✅ 已更新財政部規則');
+        ruleUpdated = true;
+        break;
+      }
+    }
+    
+    // 如果沒有找到現有規則，新增一條
+    if (!ruleUpdated) {
+      rulesSheet.appendRow([
+        'einvoice@einvoice.nat.gov.tw',
+        '消費發票彙整通知',
+        'MOF_CSV',
+        '財政部電子發票 CSV 處理 - V49.4.2 修正版'
+      ]);
+      Logger.log('✅ 已新增財政部規則');
+    }
+    
+    // 顯示更新後的規則
+    Logger.log('\n📋 更新後的財政部規則:');
+    const updatedRules = rulesSheet.getDataRange().getValues();
+    updatedRules.forEach((rule, index) => {
+      if (index > 0 && rule[0] && rule[0].includes('einvoice')) {
+        Logger.log(`  ${rule[0]} | ${rule[1]} | ${rule[2]} | ${rule[3]}`);
+      }
+    });
+    
+    return true;
+    
+  } catch (error) {
+    Logger.log(`❌ 修復失敗: ${error.message}`);
+    return false;
+  }
+}
+
+// 測試修復後的財政部郵件處理
+function testFixedMOFEmailProcessing() {
+  Logger.log('🧪 === 測試修復後的財政部郵件處理 ===');
+  
+  try {
+    // 步驟 1: 修復規則
+    Logger.log('\n🔧 步驟 1: 修復郵件規則');
+    const fixResult = fixMOFEmailRule();
+    
+    if (!fixResult) {
+      Logger.log('❌ 規則修復失敗');
+      return false;
+    }
+    
+    // 步驟 2: 測試郵件搜尋
+    Logger.log('\n🔍 步驟 2: 測試郵件搜尋');
+    const searchQuery = 'from:einvoice@einvoice.nat.gov.tw is:unread';
+    const threads = GmailApp.search(searchQuery, 0, 3);
+    Logger.log(`📧 搜尋條件: ${searchQuery}`);
+    Logger.log(`📧 找到 ${threads.length} 個郵件`);
+    
+    if (threads.length > 0) {
+      const message = threads[0].getMessages()[threads[0].getMessages().length - 1];
+      Logger.log(`📧 郵件主旨: "${message.getSubject()}"`);
+      Logger.log(`📧 寄件者: ${message.getFrom()}`);
+      Logger.log(`📧 附件數量: ${message.getAttachments().length}`);
+      
+      // 檢查 CSV 附件
+      const csvAttachments = message.getAttachments().filter(att => 
+        att.getName().toLowerCase().endsWith('.csv')
+      );
+      Logger.log(`📄 CSV 附件數量: ${csvAttachments.length}`);
+      
+      if (csvAttachments.length > 0) {
+        Logger.log(`📄 CSV 檔案: ${csvAttachments[0].getName()}`);
+      }
+    }
+    
+    // 步驟 3: 執行自動處理
+    Logger.log('\n🚀 步驟 3: 執行自動郵件處理');
+    const result = processAutomatedEmails();
+    
+    Logger.log(`📊 處理結果: ${result ? '✅ 成功' : '❌ 失敗'}`);
+    
+    return result;
+    
+  } catch (error) {
+    Logger.log(`❌ 測試失敗: ${error.message}`);
+    return false;
+  }
 }
