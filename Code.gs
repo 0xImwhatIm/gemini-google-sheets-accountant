@@ -3122,4 +3122,93 @@ function quickFixMOFInvoiceCorrected() {
   }
   
   return { setupResult, testResult, autoResult };
+}// 
+V49.4.2 錯誤診斷函數
+function diagnoseReferenceError() {
+  Logger.log('🔍 === V49.4.2 錯誤診斷 ===');
+  
+  try {
+    // 測試 1: 基本系統檢查
+    Logger.log('\n📊 測試 1: 系統健康檢查');
+    const health = checkSystemHealth();
+    Logger.log('✅ 系統健康檢查完成');
+    
+    // 測試 2: 配置檢查
+    Logger.log('\n⚙️ 測試 2: 配置檢查');
+    const configErrors = CONFIG.validate();
+    Logger.log(`配置錯誤數量: ${configErrors.length}`);
+    
+    // 測試 3: 試算表連接測試
+    Logger.log('\n📋 測試 3: 試算表連接');
+    const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
+    const rulesSheet = ss.getSheetByName(CONFIG.EMAIL_RULES_SHEET_NAME);
+    Logger.log(`EmailRules 工作表: ${rulesSheet ? '✅ 存在' : '❌ 不存在'}`);
+    
+    // 測試 4: 郵件搜尋測試
+    Logger.log('\n📧 測試 4: 郵件搜尋');
+    const threads = GmailApp.search('is:unread', 0, 1);
+    Logger.log(`未讀郵件數量: ${threads.length}`);
+    
+    // 測試 5: 函數存在性檢查
+    Logger.log('\n🔧 測試 5: 關鍵函數檢查');
+    const functions = [
+      'processAutomatedEmails',
+      'processMOFInvoiceCSV',
+      'markMOFEmailUnreadAndTest',
+      'quickFixMOFInvoice'
+    ];
+    
+    functions.forEach(funcName => {
+      try {
+        const func = eval(funcName);
+        Logger.log(`  ${funcName}: ${typeof func === 'function' ? '✅ 存在' : '❌ 不存在'}`);
+      } catch (error) {
+        Logger.log(`  ${funcName}: ❌ 錯誤 - ${error.message}`);
+      }
+    });
+    
+    Logger.log('\n🎯 === 診斷完成 ===');
+    return true;
+    
+  } catch (error) {
+    Logger.log(`❌ 診斷過程發生錯誤: ${error.message}`);
+    Logger.log(`錯誤堆疊: ${error.stack}`);
+    return false;
+  }
+}
+
+// 安全的郵件處理函數
+function safeProcessAutomatedEmails() {
+  Logger.log('🛡️ === 安全郵件處理 ===');
+  
+  try {
+    // 預檢查
+    Logger.log('📋 執行預檢查...');
+    const preCheck = diagnoseReferenceError();
+    
+    if (!preCheck) {
+      Logger.log('❌ 預檢查失敗，停止執行');
+      return false;
+    }
+    
+    // 執行郵件處理
+    Logger.log('📧 開始郵件處理...');
+    const result = processAutomatedEmails();
+    
+    Logger.log(`✅ 郵件處理完成: ${result}`);
+    return result;
+    
+  } catch (error) {
+    Logger.log(`❌ 安全郵件處理失敗: ${error.message}`);
+    Logger.log(`錯誤類型: ${error.name}`);
+    Logger.log(`錯誤堆疊: ${error.stack}`);
+    
+    // 嘗試識別錯誤原因
+    if (error.message.includes('修正版本')) {
+      Logger.log('🔍 檢測到 "修正版本" 相關錯誤');
+      Logger.log('💡 建議: 檢查代碼中是否有未引號的中文字符串');
+    }
+    
+    return false;
+  }
 }
