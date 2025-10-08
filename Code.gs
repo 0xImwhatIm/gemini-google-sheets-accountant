@@ -3211,8 +3211,9 @@ function safeProcessAutomatedEmails() {
     
     return false;
   }
-}// 修復財政部
-電子發票郵件規則
+}
+
+// 修復財政部電子發票郵件規則
 function fixMOFEmailRule() {
   Logger.log('🔧 === 修復財政部電子發票郵件規則 ===');
   
