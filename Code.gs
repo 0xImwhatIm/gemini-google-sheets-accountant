@@ -1675,4 +1675,162 @@ function cleanupOldTestFunctions() {
   Logger.log('✅ 系統功能完整性: 100%');
   Logger.log('📊 函數數量: 從 60+ 減少到 ~30 個');
   Logger.log('🚀 維護性: 大幅提升');
+}// =
+================================================================================================
+// 觸發器權限問題修復函數 (V49.5.0)
+// =================================================================================================
+
+// 強制重新授權函數
+function forceReauthorization() {
+  Logger.log('🔐 開始重新授權程序...');
+  
+  try {
+    // 強制觸發權限請求
+    const testThread = GmailApp.search('is:unread', 0, 1);
+    const testSheet = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
+    
+    Logger.log('✅ 重新授權成功');
+    return true;
+  } catch (error) {
+    Logger.log(`❌ 重新授權失敗: ${error.message}`);
+    Logger.log('💡 請手動點擊「執行」按鈕並完成授權流程');
+    return false;
+  }
+}
+
+// 刪除所有觸發器
+function deleteAllTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(trigger => {
+    ScriptApp.deleteTrigger(trigger);
+    Logger.log(`已刪除觸發器: ${trigger.getHandlerFunction()}`);
+  });
+  Logger.log(`✅ 已刪除 ${triggers.length} 個觸發器`);
+}
+
+// 完整的觸發器重建函數
+function completeTriggersRebuild() {
+  Logger.log('🔄 開始完整觸發器重建...');
+  
+  // 步驟 1: 刪除所有現有觸發器
+  const existingTriggers = ScriptApp.getProjectTriggers();
+  existingTriggers.forEach(trigger => {
+    ScriptApp.deleteTrigger(trigger);
+  });
+  Logger.log(`🗑️ 已刪除 ${existingTriggers.length} 個舊觸發器`);
+  
+  // 步驟 2: 等待一下
+  Utilities.sleep(2000);
+  
+  // 步驟 3: 創建新觸發器
+  try {
+    // 郵件處理觸發器 - 每5分鐘
+    const emailTrigger = ScriptApp.newTrigger('safeProcessAutomatedEmails')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+    Logger.log('✅ 郵件處理觸發器已創建');
+    
+    // 系統健康檢查觸發器 - 每日上午9點
+    const healthTrigger = ScriptApp.newTrigger('checkSystemHealth')
+      .timeBased()
+      .everyDays(1)
+      .atHour(9)
+      .create();
+    Logger.log('✅ 健康檢查觸發器已創建');
+    
+    // 步驟 4: 測試新觸發器
+    Logger.log('🧪 測試新觸發器...');
+    const testResult = testTriggerPermissions();
+    
+    if (testResult) {
+      Logger.log('🎉 觸發器重建完成且測試通過！');
+    } else {
+      Logger.log('⚠️ 觸發器重建完成，但需要手動授權');
+    }
+    
+    return true;
+  } catch (error) {
+    Logger.log(`❌ 觸發器創建失敗: ${error.message}`);
+    return false;
+  }
+}
+
+// 測試觸發器權限
+function testTriggerPermissions() {
+  try {
+    // 測試 Gmail 存取
+    const threads = GmailApp.search('is:unread', 0, 1);
+    Logger.log('✅ Gmail 存取正常');
+    
+    // 測試 Sheets 存取
+    const ss = SpreadsheetApp.openById(CONFIG.MAIN_LEDGER_ID);
+    Logger.log('✅ Sheets 存取正常');
+    
+    // 測試郵件處理
+    safeProcessAutomatedEmails();
+    Logger.log('✅ 郵件處理正常');
+    
+    return true;
+  } catch (error) {
+    Logger.log(`❌ 權限測試失敗: ${error.message}`);
+    return false;
+  }
+}
+
+// 驗證修復結果
+function verifyTriggerFix() {
+  Logger.log('🔍 驗證觸發器修復結果...');
+  
+  // 檢查觸發器
+  const triggers = ScriptApp.getProjectTriggers();
+  Logger.log(`📋 當前觸發器數量: ${triggers.length}`);
+  
+  triggers.forEach((trigger, index) => {
+    Logger.log(`  ${index + 1}. ${trigger.getHandlerFunction()} - ${trigger.getTriggerSource()}`);
+  });
+  
+  // 測試權限
+  const permissionTest = testTriggerPermissions();
+  
+  if (permissionTest) {
+    Logger.log('✅ 修復成功！系統準備就緒');
+  } else {
+    Logger.log('❌ 仍有權限問題，請檢查授權狀態');
+  }
+  
+  return permissionTest;
+}
+
+// 一鍵修復觸發器權限問題
+function fixTriggerAuthorizationIssue() {
+  Logger.log('🚨 === 一鍵修復觸發器權限問題 ===');
+  
+  // 步驟 1: 重新授權
+  Logger.log('\n🔐 步驟 1: 重新授權');
+  const authResult = forceReauthorization();
+  
+  // 步驟 2: 重建觸發器
+  Logger.log('\n🔄 步驟 2: 重建觸發器');
+  const rebuildResult = completeTriggersRebuild();
+  
+  // 步驟 3: 驗證修復
+  Logger.log('\n🔍 步驟 3: 驗證修復');
+  const verifyResult = verifyTriggerFix();
+  
+  // 總結
+  Logger.log('\n📊 === 修復結果總結 ===');
+  Logger.log(`🔐 重新授權: ${authResult ? '✅ 成功' : '❌ 失敗'}`);
+  Logger.log(`🔄 重建觸發器: ${rebuildResult ? '✅ 成功' : '❌ 失敗'}`);
+  Logger.log(`🔍 驗證結果: ${verifyResult ? '✅ 成功' : '❌ 失敗'}`);
+  
+  if (authResult && rebuildResult && verifyResult) {
+    Logger.log('\n🎉 觸發器權限問題已完全修復！');
+    Logger.log('💡 系統將在 5 分鐘內恢復自動郵件處理');
+  } else {
+    Logger.log('\n⚠️ 修復過程中遇到問題，請手動檢查授權狀態');
+    Logger.log('💡 建議：重新執行此函數或聯繫技術支援');
+  }
+  
+  return authResult && rebuildResult && verifyResult;
 }
