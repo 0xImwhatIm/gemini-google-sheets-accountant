@@ -5,6 +5,34 @@
 格式基於 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)，
 並且此專案遵循 [語意化版本](https://semver.org/lang/zh-TW/)。
 
+## [V49.5.1] - 2025-10-12
+
+### 🚨 緊急修復 - 觸發器權限問題
+
+#### Added 新增
+- 🆕 **forceReauthorization()**: 強制重新授權函數
+- 🆕 **completeTriggersRebuild()**: 完整觸發器重建機制
+- 🆕 **testTriggerPermissions()**: 觸發器權限測試功能
+- 🆕 **verifyTriggerFix()**: 修復結果驗證功能
+- 🆕 **fixTriggerAuthorizationIssue()**: 一鍵修復觸發器權限問題
+- 🆕 **deleteAllTriggers()**: 清理所有觸發器功能
+
+#### Fixed 修復
+- ✅ **觸發器權限錯誤**: 解決 "Authorization is required to perform that action" 問題
+- ✅ **郵件自動處理失敗**: 修復時間觸發器無法存取 Gmail 的問題
+- ✅ **重複錯誤日誌**: 消除每 15 分鐘重複的權限錯誤記錄
+- ✅ **系統穩定性**: 大幅提升自動化功能的可靠性
+
+#### Documentation 文檔
+- 📋 **觸發器權限問題解決指南**: 完整的故障排除文檔
+- 📋 **權限修復流程**: 詳細的修復步驟說明
+- 📋 **一鍵修復指南**: 快速解決方案
+
+#### Performance 性能
+- ⚡ **修復速度**: 5 分鐘內完成權限修復
+- ⚡ **恢復時間**: 15 分鐘內恢復自動郵件處理
+- ⚡ **系統穩定性**: 消除權限相關的系統中斷
+
 ## [V49.5.0] - 2025-10-08
 
 ### 🎉 重大更新 - 精簡穩定版
